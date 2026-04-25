@@ -154,7 +154,7 @@ body::before{
 }
 .home-stage{
   position:relative;
-  width:min(calc(100vw - 32px), calc((100vh - 32px) * 1365 / 2048), 430px);
+  width:min(calc(100vw - 32px), calc((100vh - 32px) * 1365 / 2048), 520px);
   aspect-ratio:1365 / 2048;
   max-height:calc(100vh - 32px);
   z-index:2;
@@ -178,9 +178,9 @@ body::before{
   pointer-events:none;
 }
 .home-asset-card{position:absolute;display:flex;align-items:center;justify-content:center;pointer-events:none;}
-.home-title-wrap{left:12%;top:5.6%;width:76%;}
+.home-title-wrap{left:11%;top:3.8%;width:78%;}
 .home-title-image{display:block;width:100%;height:auto;filter:drop-shadow(0 10px 18px rgba(0,0,0,.18));}
-.home-roulette-wrap{left:9%;top:24.4%;width:82%;display:flex;align-items:center;justify-content:center;}
+.home-roulette-wrap{left:7%;top:21.8%;width:86%;display:flex;align-items:center;justify-content:center;}
 .home-roulette-image{display:block;width:100%;height:auto;object-fit:contain;filter:drop-shadow(0 14px 24px rgba(0,0,0,.24));}
 .asset-fallback{
   width:100%;min-height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -214,10 +214,10 @@ body::before{
 .home-btn-small .btn-fallback-label{font-size:14px;}
 .home-btn-large .btn-fallback-label{font-size:18px;}
 .home-image-btn.asset-loaded .btn-fallback-label{display:none;}
-#btn-home-time{left:18%;top:57.8%;width:64%;}
-#btn-home-practice{left:18%;top:68.8%;width:64%;}
-#btn-home-wrong{left:14%;top:82.4%;width:28%;}
-#btn-home-settings{left:58%;top:82.4%;width:28%;}
+#btn-home-time{left:18%;top:58.5%;width:64%;}
+#btn-home-practice{left:18%;top:69.8%;width:64%;}
+#btn-home-wrong{left:14%;top:84.0%;width:28%;}
+#btn-home-settings{left:58%;top:84.0%;width:28%;}
 @media (max-width:380px){
   .image-home-page{padding:10px;}
   .home-stage{width:min(calc(100vw - 20px), calc((100vh - 20px) * 1365 / 2048));max-height:calc(100vh - 20px);} 
@@ -352,3 +352,5 @@ body::before{
   .mode-title{font-size:28px;}
   .setup-title{font-size:24px;}
 }
+
+.home-asset-card.asset-loaded .asset-fallback,.home-image-btn.asset-loaded .btn-fallback-label,.home-bg-layer.bg-loaded .home-bg-fallback{display:none !important;}
