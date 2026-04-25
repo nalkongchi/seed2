@@ -37,6 +37,10 @@ const state = {
   currentBgm: null
 };
 
+function isMobileView() {
+  return window.matchMedia("(max-width: 700px)").matches;
+}
+
 function $(id) { return document.getElementById(id); }
 function showPage(id) {
   document.querySelectorAll(".base-page").forEach(p => p.classList.remove("active"));
@@ -143,6 +147,11 @@ function syncBgmForPage(pageId) {
   if (!state.settings.bgm) { stopAllBgm(); return; }
   if (pageId === "home") playBgm("bgm-home");
   else if (["play","result"].includes(pageId)) playBgm("bgm-play");
+}
+
+function ensureHomeBgm() {
+  prepareAudio();
+  syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
 }
 
 function playEffect(id, fallbackType = "") {
@@ -259,6 +268,7 @@ function resetRunCommon() {
   $("ans").placeholder = "숫자 입력";
   setText("answer-guide", "");
   show("input-row", false);
+  show("mobile-keypad", false);
   show("btn-submit", false);
   show("btn-stop", false);
   setFeedback("", "");
@@ -429,6 +439,7 @@ function startRound() {
   $("ans").placeholder = "숫자 입력";
   setText("answer-guide", "");
   show("input-row", false);
+  show("mobile-keypad", false);
   show("btn-submit", false);
   show("btn-stop", true);
   setFeedback("", "");
@@ -489,9 +500,12 @@ function stopSpin() {
   setText("answer-guide", getAnswerGuideText(q));
   show("btn-stop", false);
   show("input-row", true);
+  show("mobile-keypad", isMobileView());
   show("btn-submit", true);
   $("unit-tag").textContent = q.unit || "%";
-  $("ans").focus();
+  $("ans").readOnly = isMobileView();
+  if (isMobileView()) $("ans").blur();
+  else $("ans").focus();
 }
 
 function setQuestionText(html) {
@@ -522,6 +536,21 @@ function isValidAnswerFormat(raw) {
   return /^\d+(?:\.\d+)?$/.test(raw);
 }
 
+function handleKeypadInput(key) {
+  const input = $("ans");
+  let value = input.value || "";
+  if (key === "backspace") {
+    input.value = value.slice(0, -1);
+    return;
+  }
+  if (key === ".") {
+    if (value.includes(".")) return;
+    input.value = value === "" ? "0." : value + ".";
+    return;
+  }
+  input.value = value + key;
+}
+
 function evaluateAnswer() {
   if (state.runEnded || !state.curQuestion) return;
   const raw = normalizeAnswer($("ans").value);
@@ -550,6 +579,7 @@ function evaluateAnswer() {
   }
   updateStatus();
   show("btn-submit", false);
+  show("mobile-keypad", false);
   show("input-row", false);
   state.nextTimeout = setTimeout(() => {
     if (state.runEnded) return;
@@ -573,6 +603,7 @@ function finishTimeMode() {
   clearTimeout(state.nextTimeout);
   show("btn-stop", false);
   show("btn-submit", false);
+  show("mobile-keypad", false);
   show("input-row", false);
   setFeedback("⏰ 시간이 종료되었습니다.", "");
   playEffect("se-finish", "start");
@@ -716,16 +747,27 @@ function maybeBeep(type, force = false) {
 }
 
 function bindEvents() {
-  $("btn-home-time").addEventListener("click", () => { maybeBeep("button"); startTimeMode(); });
-  $("btn-home-practice").addEventListener("click", () => { maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup"); });
-  $("btn-home-wrong").addEventListener("click", () => { maybeBeep("button"); renderWrongPage(); openModal("wrong"); });
-  $("btn-home-settings").addEventListener("click", () => { maybeBeep("button"); openModal("settings"); });
+  const homeInteract = () => ensureHomeBgm();
+  $("page-home").addEventListener("pointerdown", homeInteract, { passive: true });
+  $("page-home").addEventListener("touchstart", homeInteract, { passive: true });
+  $("page-home").addEventListener("click", homeInteract, { passive: true });
+
+  $("btn-home-time").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); startTimeMode(); });
+  $("btn-home-practice").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup"); });
+  $("btn-home-wrong").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); renderWrongPage(); openModal("wrong"); });
+  $("btn-home-settings").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); openModal("settings"); });
 
   $("btn-practice-close").addEventListener("click", () => { maybeBeep("button"); closeModal("practice-setup"); });
   $("btn-practice-start").addEventListener("click", () => { maybeBeep("button"); startPracticeMode(); });
 
   $("btn-stop").addEventListener("click", () => { maybeBeep("button"); stopSpin(); });
   $("btn-submit").addEventListener("click", () => evaluateAnswer());
+  $("mobile-keypad").addEventListener("click", (e) => {
+    const btn = e.target.closest(".keypad-btn");
+    if (!btn) return;
+    maybeBeep("button");
+    handleKeypadInput(btn.dataset.key);
+  });
   $("btn-play-home").addEventListener("click", () => { maybeBeep("button"); handleQuitPlay(); });
 
   $("btn-result-retry").addEventListener("click", () => { maybeBeep("button"); startTimeMode(); });
@@ -766,11 +808,15 @@ function init() {
   showPage("home");
   const unlock = () => {
     prepareAudio();
-    syncBgmForPage("home");
+    ensureHomeBgm();
     window.removeEventListener("pointerdown", unlock);
+    window.removeEventListener("touchstart", unlock);
+    window.removeEventListener("click", unlock);
     window.removeEventListener("keydown", unlock);
   };
   window.addEventListener("pointerdown", unlock, { once: true });
+  window.addEventListener("touchstart", unlock, { once: true, passive: true });
+  window.addEventListener("click", unlock, { once: true });
   window.addEventListener("keydown", unlock, { once: true });
 }
 
