@@ -368,23 +368,12 @@ function updateStatus() {
     setText("status-1-val", formatTime(state.timeLeft));
     setText("status-2-lbl", "정답 수");
     setText("status-2-val", String(state.correct));
-    setText("status-3-lbl", "시도 수");
-    setText("status-3-val", String(state.tries));
-    setText("status-4-lbl", "정답률");
-    $("status-4-val").className = "status-val";
-    $("status-4-val").textContent = `${state.tries ? Math.round(state.correct / state.tries * 100) : 0}%`;
     $("pbar").style.width = `${Math.max(0, Math.min(100, ((60 - state.timeLeft) / 60) * 100))}%`;
   } else {
     setText("status-1-lbl", "맞힘 수");
     setText("status-1-val", String(state.correct));
     setText("status-2-lbl", "틀림 수");
     setText("status-2-val", String(state.wrong));
-    setText("status-3-lbl", "선택 범위");
-    $("status-3-val").className = "status-val small";
-    $("status-3-val").textContent = `${state.selectedExamTypes.length}개 검사`;
-    setText("status-4-lbl", "작물 수");
-    $("status-4-val").className = "status-val small";
-    $("status-4-val").textContent = `${state.selectedCrops.length}개 작물`;
     $("pbar").style.width = state.pool.length ? `${Math.min(100, (state.correct / Math.max(10, state.correct + state.wrong + 1)) * 100)}%` : "0%";
   }
 }
@@ -431,6 +420,30 @@ function pickQuestion() {
   return source[Math.floor(Math.random() * source.length)];
 }
 
+function setMobileControlsActive(active, mode = "submit") {
+  const mobile = isMobileView();
+  const zone = $("answer-zone");
+  if (!zone) return;
+  zone.classList.toggle("is-disabled", mobile && !active);
+  if (mobile) {
+    show("input-row", true);
+    show("mobile-keypad", true);
+    show("btn-submit", mode === "submit");
+    show("btn-stop", mode === "stop");
+    $("btn-submit").disabled = !active;
+    $("ans").readOnly = true;
+    $("ans").blur();
+  } else {
+    zone.classList.remove("is-disabled");
+    $("btn-submit").disabled = !active;
+  }
+}
+
+function formatFeedback(q, isCorrect) {
+  const word = isCorrect ? "정답!" : "오답!";
+  return `<span class="result-word">${word}</span><span class="criteria">${q.item} ${q.stage} ${q.answer}${q.unit || ""}</span>`;
+}
+
 function startRound() {
   if (state.runEnded) return;
   state.curQuestion = pickQuestion();
@@ -442,10 +455,13 @@ function startRound() {
   $("ans").className = "ans-input";
   $("ans").placeholder = "숫자 입력";
   setText("answer-guide", "");
-  show("input-row", false);
-  show("mobile-keypad", false);
-  show("btn-submit", false);
-  show("btn-stop", true);
+  setMobileControlsActive(false, "stop");
+  if (!isMobileView()) {
+    show("input-row", false);
+    show("mobile-keypad", false);
+    show("btn-submit", false);
+    show("btn-stop", true);
+  }
   setFeedback("", "");
   setQuestionText("슬롯이 돌아가는 중...");
   startSpinVisual(state.curQuestion);
@@ -507,7 +523,7 @@ function stopSpin() {
   show("mobile-keypad", isMobileView());
   show("btn-submit", true);
   $("unit-tag").textContent = q.unit || "%";
-  $("ans").readOnly = isMobileView();
+  setMobileControlsActive(true, "submit");
   if (isMobileView()) $("ans").blur();
   else $("ans").focus();
 }
@@ -569,22 +585,27 @@ function evaluateAnswer() {
   if (isCorrect) {
     state.correct += 1;
     $("ans").classList.add("ok");
-    setFeedback(`✅ 정답! ${correctText}${state.curQuestion.unit}`, "ok");
+    setFeedback(formatFeedback(state.curQuestion, true), "ok");
     playEffect("se-correct", "correct");
     maybeVibrate([40]);
   } else {
     state.wrong += 1;
     $("ans").classList.add("ng");
-    setFeedback(`❌ 오답! 정답은 ${correctText}${state.curQuestion.unit}입니다`, "ng");
+    setFeedback(formatFeedback(state.curQuestion, false), "ng");
     playEffect("se-wrong", "wrong");
     maybeVibrate([50, 70, 40]);
     pushWrongNote(state.curQuestion);
     state.recentWrongs.push(state.curQuestion);
   }
   updateStatus();
-  show("btn-submit", false);
-  show("mobile-keypad", false);
-  show("input-row", false);
+  if (isMobileView()) {
+    setMobileControlsActive(false, "submit");
+    show("btn-submit", true);
+  } else {
+    show("btn-submit", false);
+    show("mobile-keypad", false);
+    show("input-row", false);
+  }
   state.nextTimeout = setTimeout(() => {
     if (state.runEnded) return;
     if ($("ans").classList.contains("ok")) $("ans").classList.remove("ok");
@@ -768,7 +789,7 @@ function bindEvents() {
   $("btn-submit").addEventListener("click", () => evaluateAnswer());
   $("mobile-keypad").addEventListener("click", (e) => {
     const btn = e.target.closest(".keypad-btn");
-    if (!btn) return;
+    if (!btn || $("answer-zone")?.classList.contains("is-disabled")) return;
     maybeBeep("button");
     handleKeypadInput(btn.dataset.key);
   });
