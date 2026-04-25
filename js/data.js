@@ -3,7 +3,6 @@
    Add your home images to:
    images/home/home_bg.png
    images/home/home_title.png
-   images/home/home_roulette.png
    images/home/btn_home_time.png
    images/home/btn_home_practice.png
    images/home/btn_home_wrong.png
@@ -19,7 +18,6 @@
 const HOME_ASSETS = {
   bg: "images/home/home_bg.png",
   title: "images/home/home_title.png",
-  roulette: "images/home/home_roulette.png",
   buttons: {
     time: "images/home/btn_home_time.png",
     practice: "images/home/btn_home_practice.png",

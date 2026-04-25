@@ -102,7 +102,6 @@ function markImageAsset(imgId, cardId, isBackground = false) {
 function initHomeAssets() {
   markImageAsset("asset-home-bg", null, true);
   markImageAsset("asset-home-title", "card-home-title");
-  markImageAsset("asset-home-roulette", "card-home-roulette");
   markImageAsset("asset-btn-home-time");
   markImageAsset("asset-btn-home-practice");
   markImageAsset("asset-btn-home-wrong");
@@ -134,13 +133,17 @@ function stopAllBgm() {
 
 function playBgm(id) {
   if (!state.settings.bgm) return;
-  if (state.currentBgm === id) return;
   const next = $(id);
   if (!next) return;
+  if (state.currentBgm === id && !next.paused) return;
   stopAllBgm();
-  state.currentBgm = id;
   const promise = next.play();
-  if (promise && typeof promise.catch === "function") promise.catch(() => {});
+  state.currentBgm = id;
+  if (promise && typeof promise.catch === "function") {
+    promise.catch(() => {
+      state.currentBgm = null;
+    });
+  }
 }
 
 function syncBgmForPage(pageId) {
@@ -149,8 +152,9 @@ function syncBgmForPage(pageId) {
   else if (["play","result"].includes(pageId)) playBgm("bgm-play");
 }
 
-function ensureHomeBgm() {
+function ensureHomeBgm(force = false) {
   prepareAudio();
+  if (force) state.currentBgm = null;
   syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
 }
 
@@ -752,10 +756,10 @@ function bindEvents() {
   $("page-home").addEventListener("touchstart", homeInteract, { passive: true });
   $("page-home").addEventListener("click", homeInteract, { passive: true });
 
-  $("btn-home-time").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); startTimeMode(); });
-  $("btn-home-practice").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup"); });
-  $("btn-home-wrong").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); renderWrongPage(); openModal("wrong"); });
-  $("btn-home-settings").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); openModal("settings"); });
+  $("btn-home-time").addEventListener("click", () => { ensureHomeBgm(true); maybeBeep("button"); startTimeMode(); });
+  $("btn-home-practice").addEventListener("click", () => { ensureHomeBgm(true); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup"); });
+  $("btn-home-wrong").addEventListener("click", () => { ensureHomeBgm(true); maybeBeep("button"); renderWrongPage(); openModal("wrong"); });
+  $("btn-home-settings").addEventListener("click", () => { ensureHomeBgm(true); maybeBeep("button"); openModal("settings"); });
 
   $("btn-practice-close").addEventListener("click", () => { maybeBeep("button"); closeModal("practice-setup"); });
   $("btn-practice-start").addEventListener("click", () => { maybeBeep("button"); startPracticeMode(); });
@@ -771,7 +775,7 @@ function bindEvents() {
   $("btn-play-home").addEventListener("click", () => { maybeBeep("button"); handleQuitPlay(); });
 
   $("btn-result-retry").addEventListener("click", () => { maybeBeep("button"); startTimeMode(); });
-  $("btn-result-home").addEventListener("click", () => { maybeBeep("button"); showPage("home"); });
+  $("btn-result-home").addEventListener("click", () => { maybeBeep("button"); ensureHomeBgm(true); showPage("home"); });
 
   $("btn-wrong-practice").addEventListener("click", () => { maybeBeep("button"); startWrongPracticeMode(); });
   $("btn-wrong-clear").addEventListener("click", () => { maybeBeep("button"); clearWrongNotes(); });
