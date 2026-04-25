@@ -12,7 +12,7 @@
 
 ## 홈 이미지 넣는 위치
 아래 파일명을 그대로 써서 넣으면 바로 연결돼.
-- `images/home/home_bg.png`
+- `images/home/home_bg.png (직접 넣어주세요)`
 - `images/home/home_title.png`
 - `images/home/home_roulette.png`
 - `images/home/btn_home_time.png`
