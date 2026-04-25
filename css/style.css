@@ -408,9 +408,9 @@ body::before{
   .top-home-btn{min-width:76px;}
   .game-hero{padding:9px;border-radius:18px;}
   .status-grid{gap:6px;margin-bottom:7px;}
-  .status-box{min-height:42px;padding:7px 10px;border-radius:13px;}
-  .status-lbl{font-size:10px;margin-bottom:1px;}
-  .status-val{font-size:18px;}
+  .status-box{min-height:50px;padding:9px 12px;border-radius:14px;}
+  .status-lbl{font-size:10.5px;margin-bottom:2px;}
+  .status-val{font-size:20px;}
   .pbar-track{height:5px;margin-bottom:7px;}
   .game-shell{padding:9px;border-radius:21px;}
   .game-shell::before{inset:6px;border-radius:17px;}
@@ -431,12 +431,12 @@ body::before{
   .answer-zone.is-disabled .keypad-btn,.answer-zone.is-disabled #btn-submit{pointer-events:none;filter:saturate(.65);}
   .answer-guide{font-size:11px;min-height:14px;text-align:center;line-height:1.2;}
   .input-row{gap:6px;}
-  .ans-input,.unit-tag{height:34px;border-radius:12px;}
-  .ans-input{font-size:17px;}
-  .unit-tag{min-width:44px;font-size:13px;}
+  .ans-input,.unit-tag{height:44px;border-radius:14px;}
+  .ans-input{font-size:20px;}
+  .unit-tag{min-width:48px;font-size:14px;}
   .mobile-keypad{display:grid;gap:5px;grid-template-columns:repeat(3,1fr);}
   .mobile-keypad.hidden{display:grid !important;}
   .keypad-btn{height:28px;font-size:18px;border-radius:10px;box-shadow:0 5px 12px rgba(0,0,0,.14);}
   #btn-submit{height:36px;font-size:15px;border-radius:13px;}
-  #btn-stop{height:36px;font-size:15px;border-radius:13px;}
+  #btn-stop{height:44px;font-size:17px;border-radius:14px;}
 }
