@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>종자검사 트레이닝 v1.2 home-image starter</title>
+<title>종자검사 트레이닝 v1.2-2</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;800&family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -13,6 +13,7 @@
 <div id="app">
 
 <section id="page-home" class="page base-page active image-home-page">
+  <div class="home-stage">
   <div class="home-bg-layer">
     <img id="asset-home-bg" class="home-bg-image" src="images/home/home_bg.png" alt="">
     <div class="home-bg-fallback">home_bg.png</div>
@@ -60,6 +61,7 @@
       </div>
     </div>
   </div>
+</div>
 </section>
 
 <section id="page-practice-setup" class="page modal-layer">
@@ -235,17 +237,28 @@
         <div class="section-title">Settings</div>
         <h2 style="font-family:'Black Han Sans',sans-serif;color:var(--gold);font-size:24px;margin-top:4px;">설정</h2>
       </div>
-      <div class="pill">v1.1-10</div>
+      <div class="pill">v1.2-2</div>
     </div>
 
     <div class="setting-card panel">
       <label class="toggle-row">
         <div class="meta">
-          <strong>효과음</strong>
-          <span>정답/오답과 버튼 효과음을 켭니다.</span>
+          <strong>배경음악</strong>
+          <span>홈과 플레이 BGM 재생 여부를 설정합니다.</span>
         </div>
         <div class="switch">
-          <input type="checkbox" id="toggle-sound">
+          <input type="checkbox" id="toggle-bgm">
+          <span class="slider"></span>
+        </div>
+      </label>
+
+      <label class="toggle-row">
+        <div class="meta">
+          <strong>효과음</strong>
+          <span>정답/오답/종료 효과음을 켭니다.</span>
+        </div>
+        <div class="switch">
+          <input type="checkbox" id="toggle-sfx">
           <span class="slider"></span>
         </div>
       </label>

@@ -1,4 +1,3 @@
-home_bg.png
 home_title.png
 home_roulette.png
 btn_home_time.png

@@ -2,9 +2,9 @@ const QUESTION_SET = buildQuestionSet(QUESTION_RULES);
 const EXAM_TYPES = ["포장검사", "종자검사"];
 const CROPS = ["벼", "보리", "밀", "콩", "팥", "트리티케일(사료용)"];
 const STORAGE_KEYS = {
-  best: "seedTraining_v1_1_bestTimeAttack",
-  wrongs: "seedTraining_v1_1_wrongNotes",
-  settings: "seedTraining_v1_1_settings"
+  best: "seedTraining_v1_2_bestTimeAttack",
+  wrongs: "seedTraining_v1_2_wrongNotes",
+  settings: "seedTraining_v1_2_settings"
 };
 const MODE_META = {
   time: { en: "Time Attack", title: "실전모드", pill: "⚡ 1분 타임어택", sub: "전체 범위 랜덤 · 1분 제한" },
@@ -25,7 +25,7 @@ const state = {
   tries: 0,
   recentWrongs: [],
   wrongNotes: [],
-  settings: { sound: true, vibrate: true },
+  settings: { bgm: true, sfx: true, vibrate: true },
   timeLeft: 60,
   timeInterval: null,
   nextTimeout: null,
@@ -111,7 +111,7 @@ function prepareAudio() {
   ["bgm-home","bgm-play","se-correct","se-wrong","se-finish"].forEach(id => {
     const el = $(id);
     if (el) {
-      el.volume = id.startsWith("bgm") ? 0.48 : 0.9;
+      el.volume = id.startsWith("bgm") ? 0.42 : 0.72;
       try { el.load(); } catch (e) {}
     }
   });
@@ -129,7 +129,7 @@ function stopAllBgm() {
 }
 
 function playBgm(id) {
-  if (!state.settings.sound && !force) return;
+  if (!state.settings.bgm) return;
   if (state.currentBgm === id) return;
   const next = $(id);
   if (!next) return;
@@ -140,12 +140,13 @@ function playBgm(id) {
 }
 
 function syncBgmForPage(pageId) {
+  if (!state.settings.bgm) { stopAllBgm(); return; }
   if (pageId === "home") playBgm("bgm-home");
   else if (["play","result"].includes(pageId)) playBgm("bgm-play");
 }
 
 function playEffect(id, fallbackType = "") {
-  if (!state.settings.sound) return;
+  if (!state.settings.sfx) return;
   prepareAudio();
   const el = $(id);
   if (el) {
@@ -161,15 +162,17 @@ function playEffect(id, fallbackType = "") {
   if (fallbackType) maybeBeep(fallbackType, true);
 }
 function loadSettings() {
-  state.settings = loadJSON(STORAGE_KEYS.settings, { sound: true, vibrate: true });
-  $("toggle-sound").checked = !!state.settings.sound;
+  state.settings = loadJSON(STORAGE_KEYS.settings, { bgm: true, sfx: true, vibrate: true });
+  $("toggle-bgm").checked = !!state.settings.bgm;
+  $("toggle-sfx").checked = !!state.settings.sfx;
   $("toggle-vibrate").checked = !!state.settings.vibrate;
 }
 function saveSettings() {
-  state.settings.sound = $("toggle-sound").checked;
+  state.settings.bgm = $("toggle-bgm").checked;
+  state.settings.sfx = $("toggle-sfx").checked;
   state.settings.vibrate = $("toggle-vibrate").checked;
   saveJSON(STORAGE_KEYS.settings, state.settings);
-  if (!state.settings.sound) stopAllBgm();
+  if (!state.settings.bgm) stopAllBgm();
   else syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
   setFeedback("설정을 저장했어요.", "");
   maybeBeep("button");
@@ -685,7 +688,7 @@ function maybeVibrate(pattern) {
 }
 
 function maybeBeep(type, force = false) {
-  if (!state.settings.sound) return;
+  if (!state.settings.sfx) return;
   try {
     if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const ctx = state.audioCtx;
