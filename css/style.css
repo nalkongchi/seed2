@@ -635,3 +635,159 @@ body::before{
   #btn-home-wrong{left:15%;}
   #btn-home-settings{left:50.5%;}
 }
+
+/* v1.2-10 refinements */
+/* 제출 버튼: 초록색 + 체크 아이콘 문구와 어울리게 */
+.btn-submit{
+  background:linear-gradient(135deg,#43dc7a,#16a34a) !important;
+  color:#062513 !important;
+  box-shadow:0 8px 22px rgba(34,197,94,.32) !important;
+  font-weight:900;
+}
+.btn-submit:active{filter:brightness(.96);}
+
+/* 홈 화면: 모바일에서 위에서 시작, 타이틀 105%, 버튼 안 2 기준 */
+.image-home-page{justify-content:flex-start;align-items:center;}
+.home-title-wrap{
+  left:8% !important;
+  width:84% !important;
+  top:calc(3.6% + 20px) !important;
+}
+.home-btn-large{aspect-ratio:797 / 225;}
+.home-btn-small{aspect-ratio:955 / 261;}
+#btn-home-time,
+#btn-home-practice{
+  left:17% !important;
+  width:66% !important;
+}
+#btn-home-time{top:59.2% !important;}
+#btn-home-practice{top:69.4% !important;}
+#btn-home-wrong,
+#btn-home-settings{
+  top:81.4% !important;
+  width:32.5% !important;
+}
+#btn-home-wrong{left:17% !important;}
+#btn-home-settings{left:50.5% !important;}
+
+/* BGM 볼륨 조절 */
+.volume-row{gap:12px;}
+.volume-control{display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.volume-btn{
+  width:34px;height:34px;border:none;border-radius:11px;
+  background:rgba(15,27,44,.82);border:1px solid rgba(255,255,255,.10);
+  color:var(--gold2);font-size:20px;font-weight:900;line-height:1;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  box-shadow:0 8px 16px rgba(0,0,0,.18);
+}
+.volume-btn:active{transform:translateY(1px) scale(.97);}
+.volume-level{
+  min-width:24px;text-align:center;font-family:'Orbitron',sans-serif;font-weight:800;
+  font-size:18px;color:var(--gold2);
+}
+
+/* 자리수 안내: 슬롯과 문제문장 사이 */
+.play-answer-guide{
+  min-height:20px;
+  display:flex;align-items:center;justify-content:center;
+  text-align:center;font-size:12px;font-weight:800;letter-spacing:-.02em;
+  color:#d9e2f7;opacity:.88;line-height:1.2;
+  margin:-2px 0 0;
+  flex-shrink:0;
+}
+.play-answer-guide:empty::before{content:"";}
+
+/* 모바일 결과창: 하단 버튼 항상 보이게 */
+@media (max-width:700px){
+  .image-home-page{justify-content:flex-start !important;align-items:center !important;}
+  .home-stage{
+    width:min(100vw,430px) !important;
+    height:calc(min(100vw,430px) * 16 / 9) !important;
+    max-height:none !important;
+    border-radius:0 !important;
+    margin-top:0 !important;
+  }
+  .home-bg-image{object-fit:cover;object-position:center top;}
+  .home-title-wrap{
+    left:5.9% !important;
+    width:88.2% !important;
+    top:calc(3% + 20px) !important;
+  }
+  #btn-home-time,
+  #btn-home-practice{
+    left:17% !important;
+    width:66% !important;
+  }
+  #btn-home-time{top:59.2% !important;}
+  #btn-home-practice{top:69.4% !important;}
+  #btn-home-wrong,
+  #btn-home-settings{
+    top:81.4% !important;
+    width:32.5% !important;
+  }
+  #btn-home-wrong{left:17% !important;}
+  #btn-home-settings{left:50.5% !important;}
+
+  /* 모바일 STOP/제출: 같은 크기 */
+  #btn-stop,
+  #btn-submit{
+    height:54px !important;
+    min-height:54px !important;
+    font-size:18px !important;
+    border-radius:16px !important;
+  }
+
+  /* 모바일 조작부 여유 재계산 */
+  #page-play{padding-bottom:calc(212px + env(safe-area-inset-bottom,0px)) !important;}
+  .answer-zone{gap:5px;}
+  .answer-zone .answer-guide{display:none;}
+  .play-answer-guide{font-size:12px;min-height:19px;margin:0;}
+
+  /* 결과 화면을 고정 그리드로 */
+  #page-result{
+    height:100svh;overflow:hidden;justify-content:flex-start !important;
+    padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px)) !important;
+  }
+  #page-result .result-layout{
+    height:100%;min-height:0;display:grid;
+    grid-template-rows:auto auto auto minmax(0,1fr) auto;
+    gap:7px;
+  }
+  #page-result .result-hero{padding:10px 12px;border-radius:16px;}
+  #page-result .trophy-icon{font-size:34px;}
+  #page-result .result-title,
+  #page-result .result-hero h2.result-title{font-size:27px !important;margin-top:4px;}
+  #page-result .result-hero p{font-size:12px;margin-top:2px;}
+  #page-result .stats-grid{gap:7px;}
+  #page-result .stat-card{padding:8px 8px;border-radius:14px;}
+  #page-result .stat-card .sc-lbl{font-size:10px;}
+  #page-result .stat-card .sc-val{font-size:22px;}
+  #page-result .stat-card.wide .sc-val{font-size:26px;}
+  #page-result .result-mini-grid{gap:6px;}
+  #page-result .result-mini-grid .stat-card{padding:7px 5px;}
+  #page-result .result-mini-grid .sc-val{font-size:18px;}
+  #page-result .result-mini-grid .sc-sub{font-size:10px;}
+  #page-result .result-wrong-panel{
+    min-height:0 !important;height:auto !important;padding:10px;border-radius:16px;
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+  #page-result .result-wrong-panel .section-head{margin-bottom:6px !important;}
+  #page-result .result-wrong-panel .pill{display:none;}
+  #page-result .result-wrong-panel .list-scroll{
+    height:auto !important;max-height:none !important;min-height:0;flex:1;overflow-y:auto;
+  }
+  #page-result .empty-state{padding:14px 8px;font-size:12px;line-height:1.55;}
+  #page-result .note-item{padding:7px 9px;border-radius:11px;}
+  #page-result .note-item .txt{font-size:11px;line-height:1.35;}
+  #page-result .note-item .txt strong{font-size:12px;}
+  #page-result .note-item .ans{font-size:14px;}
+  #page-result .btn-row.equal{gap:8px;}
+  #page-result .btn-row.equal .btn{height:48px;font-size:14px;border-radius:14px;}
+}
+
+@media (max-width:380px){
+  .home-title-wrap{top:calc(2.8% + 18px) !important;}
+  #btn-home-time{top:59.4% !important;}
+  #btn-home-practice{top:69.7% !important;}
+  #btn-home-wrong,#btn-home-settings{top:81.8% !important;}
+}

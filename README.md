@@ -22,6 +22,7 @@
 ## 오디오 넣는 위치
 - `audio/bgm_home.mp3`
 - `audio/bgm_play.mp3`
+- `audio/bgm_play2.mp3`
 - `audio/se_correct.wav`
 - `audio/se_wrong.wav`
 - `audio/se_finish.wav`

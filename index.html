@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>종자검사 트레이닝 v1.2-9</title>
+<title>종자검사 트레이닝 v1.2-10</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;800&family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -149,11 +149,11 @@
     </div>
   </div>
 
+  <div class="answer-guide play-answer-guide" id="answer-guide"></div>
   <div class="feedback hidden" id="feedback"></div>
   <div class="q-text" id="q-text">문제를 불러오는 중...</div>
 
   <div class="answer-zone" id="answer-zone">
-    <div class="answer-guide" id="answer-guide"></div>
     <div class="input-row hidden" id="input-row">
       <input class="ans-input" id="ans" type="text" inputmode="decimal" placeholder="숫자 입력" autocomplete="off"/>
       <div class="unit-tag" id="unit-tag">%</div>
@@ -172,7 +172,7 @@
       <button class="keypad-btn" data-key=".">.</button>
       <button class="keypad-btn control" data-key="backspace">←</button>
     </div>
-    <button class="btn btn-submit hidden" id="btn-submit">제출 ↵</button>
+    <button class="btn btn-submit hidden" id="btn-submit">✔️ 제출</button>
     <button class="btn btn-stop hidden" id="btn-stop">🛑 STOP</button>
   </div>
   </div>
@@ -258,20 +258,21 @@
         <div class="section-title">Settings</div>
         <h2 class="modal-title">설정</h2>
       </div>
-      <div class="pill">v1.2-9</div>
+      <div class="pill">v1.2-10</div>
     </div>
 
     <div class="setting-card panel">
-      <label class="toggle-row">
+      <div class="toggle-row volume-row">
         <div class="meta">
-          <strong>배경음악</strong>
-          <span>홈과 플레이 BGM 재생 여부를 설정합니다.</span>
+          <strong>BGM 음량</strong>
+          <span>0이면 꺼지고, 5에 가까울수록 커집니다.</span>
         </div>
-        <div class="switch">
-          <input type="checkbox" id="toggle-bgm">
-          <span class="slider"></span>
+        <div class="volume-control" aria-label="BGM 음량 조절">
+          <button type="button" class="volume-btn" id="btn-bgm-down" aria-label="BGM 음량 줄이기">−</button>
+          <span class="volume-level" id="bgm-volume-level">3</span>
+          <button type="button" class="volume-btn" id="btn-bgm-up" aria-label="BGM 음량 키우기">＋</button>
         </div>
-      </label>
+      </div>
 
       <label class="toggle-row">
         <div class="meta">
@@ -309,6 +310,7 @@
 
   <audio id="bgm-home" preload="auto" loop src="audio/bgm_home.mp3"></audio>
   <audio id="bgm-play" preload="auto" loop src="audio/bgm_play.mp3"></audio>
+  <audio id="bgm-play2" preload="auto" loop src="audio/bgm_play2.mp3"></audio>
   <audio id="se-correct" preload="auto" src="audio/se_correct.wav"></audio>
   <audio id="se-wrong" preload="auto" src="audio/se_wrong.wav"></audio>
   <audio id="se-finish" preload="auto" src="audio/se_finish.wav"></audio>

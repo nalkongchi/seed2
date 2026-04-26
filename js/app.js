@@ -25,7 +25,7 @@ const state = {
   tries: 0,
   recentWrongs: [],
   wrongNotes: [],
-  settings: { bgm: true, sfx: true, vibrate: true },
+  settings: { bgmLevel: 3, sfx: true, vibrate: true },
   timeLeft: 60,
   timeInterval: null,
   nextTimeout: null,
@@ -108,20 +108,36 @@ function initHomeAssets() {
   markImageAsset("asset-btn-home-settings");
 }
 
-function prepareAudio() {
-  if (state.audioReady) return;
-  state.audioReady = true;
-  ["bgm-home","bgm-play","se-correct","se-wrong","se-finish"].forEach(id => {
+function getBgmVolume() {
+  const level = Math.max(0, Math.min(5, Number(state.settings.bgmLevel ?? 3)));
+  return [0, 0.14, 0.26, 0.42, 0.55, 0.70][level] || 0;
+}
+function applyAudioVolumes() {
+  const bgmVol = getBgmVolume();
+  ["bgm-home","bgm-play","bgm-play2"].forEach(id => {
     const el = $(id);
-    if (el) {
-      el.volume = id.startsWith("bgm") ? 0.42 : 0.72;
-      try { el.load(); } catch (e) {}
-    }
+    if (el) el.volume = bgmVol;
   });
+  ["se-correct","se-wrong","se-finish"].forEach(id => {
+    const el = $(id);
+    if (el) el.volume = 0.72;
+  });
+}
+function prepareAudio() {
+  if (!state.audioReady) {
+    state.audioReady = true;
+    ["bgm-home","bgm-play","bgm-play2","se-correct","se-wrong","se-finish"].forEach(id => {
+      const el = $(id);
+      if (el) {
+        try { el.load(); } catch (e) {}
+      }
+    });
+  }
+  applyAudioVolumes();
 }
 
 function stopAllBgm() {
-  ["bgm-home","bgm-play"].forEach(id => {
+  ["bgm-home","bgm-play","bgm-play2"].forEach(id => {
     const el = $(id);
     if (el) {
       el.pause();
@@ -132,11 +148,13 @@ function stopAllBgm() {
 }
 
 function playBgm(id) {
-  if (!state.settings.bgm) return;
+  prepareAudio();
+  if (getBgmVolume() <= 0) { stopAllBgm(); return; }
   const next = $(id);
   if (!next) return;
   if (state.currentBgm === id && !next.paused) return;
   stopAllBgm();
+  applyAudioVolumes();
   const promise = next.play();
   state.currentBgm = id;
   if (promise && typeof promise.catch === "function") {
@@ -147,9 +165,12 @@ function playBgm(id) {
 }
 
 function syncBgmForPage(pageId) {
-  if (!state.settings.bgm) { stopAllBgm(); return; }
+  if (getBgmVolume() <= 0) { stopAllBgm(); return; }
   if (pageId === "home") playBgm("bgm-home");
-  else if (pageId === "play") playBgm("bgm-play");
+  else if (pageId === "play") {
+    if (state.mode === "practice" || state.mode === "wrong-practice") playBgm("bgm-play2");
+    else playBgm("bgm-play");
+  }
   else if (pageId === "result") playBgm("bgm-home");
 }
 
@@ -175,18 +196,39 @@ function playEffect(id, fallbackType = "") {
   }
   if (fallbackType) maybeBeep(fallbackType, true);
 }
+function normalizeSettings(raw) {
+  const base = { bgmLevel: 3, sfx: true, vibrate: true };
+  const out = Object.assign(base, raw || {});
+  if (typeof out.bgmLevel === "undefined") out.bgmLevel = out.bgm === false ? 0 : 3;
+  out.bgmLevel = Math.max(0, Math.min(5, Number(out.bgmLevel ?? 3)));
+  return out;
+}
+function updateBgmVolumeUI() {
+  const el = $("bgm-volume-level");
+  if (el) el.textContent = String(state.settings.bgmLevel ?? 3);
+}
+function adjustBgmLevel(delta) {
+  prepareAudio();
+  state.settings.bgmLevel = Math.max(0, Math.min(5, Number(state.settings.bgmLevel ?? 3) + delta));
+  updateBgmVolumeUI();
+  applyAudioVolumes();
+  saveJSON(STORAGE_KEYS.settings, state.settings);
+  if (state.settings.bgmLevel <= 0) stopAllBgm();
+  else syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
+}
 function loadSettings() {
-  state.settings = loadJSON(STORAGE_KEYS.settings, { bgm: true, sfx: true, vibrate: true });
-  $("toggle-bgm").checked = !!state.settings.bgm;
+  state.settings = normalizeSettings(loadJSON(STORAGE_KEYS.settings, { bgmLevel: 3, sfx: true, vibrate: true }));
+  updateBgmVolumeUI();
   $("toggle-sfx").checked = !!state.settings.sfx;
   $("toggle-vibrate").checked = !!state.settings.vibrate;
 }
 function saveSettings() {
-  state.settings.bgm = $("toggle-bgm").checked;
   state.settings.sfx = $("toggle-sfx").checked;
   state.settings.vibrate = $("toggle-vibrate").checked;
+  state.settings.bgmLevel = Math.max(0, Math.min(5, Number(state.settings.bgmLevel ?? 3)));
   saveJSON(STORAGE_KEYS.settings, state.settings);
-  if (!state.settings.bgm) stopAllBgm();
+  applyAudioVolumes();
+  if (state.settings.bgmLevel <= 0) stopAllBgm();
   else syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
   setFeedback("설정을 저장했어요.", "");
   maybeBeep("button");
@@ -635,6 +677,7 @@ function finishTimeMode() {
   setFeedback("⏰ 시간이 종료되었습니다.", "");
   stopAllBgm();
   playEffect("se-finish", "start");
+  maybeVibrate([80, 60, 120]);
   const acc = state.tries ? Math.round(state.correct / state.tries * 100) : 0;
   const prev = state.timeAttackBest;
   const isNew = state.correct > (prev.correct || 0) || (state.correct === (prev.correct || 0) && acc > (prev.acc || 0));
@@ -746,10 +789,12 @@ function renderSlotValue(el, text, kind = "text") {
 }
 
 function maybeVibrate(pattern) {
-  if (state.settings.vibrate && navigator.vibrate) navigator.vibrate(pattern);
+  if (!state.settings.vibrate || !navigator.vibrate) return;
+  try { navigator.vibrate(pattern); } catch (e) {}
 }
 
 function maybeBeep(type, force = false) {
+  if (type === "button") maybeVibrate([20]);
   if (!state.settings.sfx) return;
   try {
     if (!state.audioCtx) state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -813,6 +858,8 @@ function bindEvents() {
 
   $("btn-settings-save").addEventListener("click", () => { maybeBeep("button"); saveSettings(); closeModal("settings"); });
   $("btn-settings-close").addEventListener("click", () => { maybeBeep("button"); closeModal("settings"); });
+  $("btn-bgm-down").addEventListener("click", () => { maybeBeep("button"); adjustBgmLevel(-1); });
+  $("btn-bgm-up").addEventListener("click", () => { maybeBeep("button"); adjustBgmLevel(1); });
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !$("btn-submit").classList.contains("hidden")) {
