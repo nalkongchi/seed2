@@ -42,11 +42,11 @@ function isMobileView() {
 }
 
 function $(id) { return document.getElementById(id); }
-function showPage(id) {
+function showPage(id, opts = {}) {
   document.querySelectorAll(".base-page").forEach(p => p.classList.remove("active"));
   $("page-" + id).classList.add("active");
   closeAllModals();
-  syncBgmForPage(id);
+  if (opts.syncBgm !== false) syncBgmForPage(id);
 }
 function openModal(id) {
   $("page-" + id).classList.add("active");
@@ -149,12 +149,13 @@ function playBgm(id) {
 function syncBgmForPage(pageId) {
   if (!state.settings.bgm) { stopAllBgm(); return; }
   if (pageId === "home") playBgm("bgm-home");
-  else if (["play","result"].includes(pageId)) playBgm("bgm-play");
+  else if (pageId === "play") playBgm("bgm-play");
+  else if (pageId === "result") playBgm("bgm-home");
 }
 
 function ensureHomeBgm(force = false) {
   prepareAudio();
-  if (force) state.currentBgm = null;
+  // 같은 BGM이 이미 재생 중이면 메뉴/팝업 클릭으로 음악을 처음부터 다시 시작하지 않는다.
   syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
 }
 
@@ -304,6 +305,7 @@ function getAnswerGuideText(q) {
 
 function startTimeMode() {
   prepareAudio();
+  closeModal("time-intro");
   state.mode = "time";
   state.pool = [...QUESTION_SET];
   resetRunCommon();
@@ -631,6 +633,7 @@ function finishTimeMode() {
   show("mobile-keypad", false);
   show("input-row", false);
   setFeedback("⏰ 시간이 종료되었습니다.", "");
+  stopAllBgm();
   playEffect("se-finish", "start");
   const acc = state.tries ? Math.round(state.correct / state.tries * 100) : 0;
   const prev = state.timeAttackBest;
@@ -641,12 +644,15 @@ function finishTimeMode() {
   }
   $("new-badge").classList.toggle("hidden", !isNew);
   setText("r-correct", `${state.correct}개`);
-  setText("r-best", `${state.timeAttackBest.correct || 0}개`);
+  $("r-best").innerHTML = `<span class="best-num">${state.timeAttackBest.correct || 0}</span>개`;
   setText("r-tries", String(state.tries));
   setText("r-acc", `${acc}%`);
   setText("r-wrong", String(state.wrong));
   renderResultWrongs();
-  showPage("result");
+  showPage("result", { syncBgm: false });
+  setTimeout(() => {
+    if ($("page-result")?.classList.contains("active")) playBgm("bgm-home");
+  }, 750);
 }
 
 function renderResultWrongs() {
@@ -777,10 +783,13 @@ function bindEvents() {
   $("page-home").addEventListener("touchstart", homeInteract, { passive: true });
   $("page-home").addEventListener("click", homeInteract, { passive: true });
 
-  $("btn-home-time").addEventListener("click", () => { ensureHomeBgm(true); maybeBeep("button"); startTimeMode(); });
-  $("btn-home-practice").addEventListener("click", () => { ensureHomeBgm(true); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup"); });
-  $("btn-home-wrong").addEventListener("click", () => { ensureHomeBgm(true); maybeBeep("button"); renderWrongPage(); openModal("wrong"); });
-  $("btn-home-settings").addEventListener("click", () => { ensureHomeBgm(true); maybeBeep("button"); openModal("settings"); });
+  $("btn-home-time").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); openModal("time-intro"); });
+  $("btn-home-practice").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup"); });
+  $("btn-home-wrong").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); renderWrongPage(); openModal("wrong"); });
+  $("btn-home-settings").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); openModal("settings"); });
+
+  $("btn-time-intro-close").addEventListener("click", () => { maybeBeep("button"); closeModal("time-intro"); });
+  $("btn-time-intro-start").addEventListener("click", () => { maybeBeep("button"); startTimeMode(); });
 
   $("btn-practice-close").addEventListener("click", () => { maybeBeep("button"); closeModal("practice-setup"); });
   $("btn-practice-start").addEventListener("click", () => { maybeBeep("button"); startPracticeMode(); });
@@ -796,7 +805,7 @@ function bindEvents() {
   $("btn-play-home").addEventListener("click", () => { maybeBeep("button"); handleQuitPlay(); });
 
   $("btn-result-retry").addEventListener("click", () => { maybeBeep("button"); startTimeMode(); });
-  $("btn-result-home").addEventListener("click", () => { maybeBeep("button"); ensureHomeBgm(true); showPage("home"); });
+  $("btn-result-home").addEventListener("click", () => { maybeBeep("button"); showPage("home"); });
 
   $("btn-wrong-practice").addEventListener("click", () => { maybeBeep("button"); startWrongPracticeMode(); });
   $("btn-wrong-clear").addEventListener("click", () => { maybeBeep("button"); clearWrongNotes(); });

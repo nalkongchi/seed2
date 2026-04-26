@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>종자검사 트레이닝 v1.2-7</title>
+<title>종자검사 트레이닝 v1.2-9</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;500;700;800&family=Orbitron:wght@500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
@@ -56,13 +56,36 @@
 </div>
 </section>
 
+
+<section id="page-time-intro" class="page modal-layer">
+  <div class="modal-window panel">
+    <button class="modal-close" id="btn-time-intro-close" aria-label="닫기">✕</button>
+    <div class="section-head">
+      <div>
+        <div class="section-title">Time Attack</div>
+        <h2 class="modal-title">실전모드 안내</h2>
+      </div>
+    </div>
+
+    <div class="setup-card panel time-intro-card">
+      <p>전체 범위에서 문제가 무작위로 출제됩니다.</p>
+      <p>1분 동안 최대한 많은 정답을 맞혀보세요.</p>
+      <p>정답 수와 기록이 저장됩니다.</p>
+    </div>
+
+    <div class="setup-actions">
+      <button class="btn btn-gold" id="btn-time-intro-start">⚡ 실전 시작</button>
+    </div>
+  </div>
+</section>
+
 <section id="page-practice-setup" class="page modal-layer">
   <div class="modal-window panel">
     <button class="modal-close" id="btn-practice-close" aria-label="닫기">✕</button>
     <div class="section-head">
       <div>
         <div class="section-title">Practice Setup</div>
-        <h2 class="setup-title">연습모드 범위선택</h2>
+        <h2 class="setup-title modal-title">연습모드 범위선택</h2>
       </div>
     </div>
 
@@ -159,7 +182,7 @@
   <div class="result-layout">
     <div class="result-hero panel">
       <span class="trophy-icon">🏆</span>
-      <h2>실전모드 종료!</h2>
+      <h2 class="result-title">실전모드 종료!</h2>
       <p>1분 타임어택 결과를 확인하세요</p>
       <div class="new-badge hidden" id="new-badge">⚡ 최고 기록 갱신!</div>
     </div>
@@ -168,7 +191,7 @@
       <div class="stat-card wide">
         <div class="sc-lbl">✅ 맞힌 문제 수</div>
         <div class="sc-val" id="r-correct">0개</div>
-        <div class="sc-sub">최고 기록: <span id="r-best">0개</span></div>
+        <div class="sc-sub best-sub">최고 기록: <span id="r-best"><span class="best-num">0</span>개</span></div>
       </div>
     </div>
 
@@ -211,7 +234,7 @@
     <div class="section-head">
       <div>
         <div class="section-title">Wrong Notes</div>
-        <h2 style="font-family:'Black Han Sans',sans-serif;color:var(--gold);font-size:24px;margin-top:4px;">오답노트</h2>
+        <h2 class="modal-title">오답노트</h2>
       </div>
       <div class="pill"><strong id="wrong-total">0</strong> 개</div>
     </div>
@@ -233,9 +256,9 @@
     <div class="section-head">
       <div>
         <div class="section-title">Settings</div>
-        <h2 style="font-family:'Black Han Sans',sans-serif;color:var(--gold);font-size:24px;margin-top:4px;">설정</h2>
+        <h2 class="modal-title">설정</h2>
       </div>
-      <div class="pill">v1.2-7</div>
+      <div class="pill">v1.2-9</div>
     </div>
 
     <div class="setting-card panel">

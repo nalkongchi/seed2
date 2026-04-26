@@ -440,3 +440,198 @@ body::before{
   #btn-submit{height:36px;font-size:15px;border-radius:13px;}
   #btn-stop{height:44px;font-size:17px;border-radius:14px;}
 }
+
+/* v1.2-9 refinements */
+/* 제목 전용 클래스: 글씨체는 유지하고 크기/간격/대비만 직접 통제 */
+.modal-title,
+.setup-title.modal-title{
+  font-family:'Black Han Sans',sans-serif;
+  color:var(--gold);
+  font-size:29px;
+  line-height:1.04;
+  letter-spacing:-.4px;
+  margin-top:8px;
+  text-shadow:0 2px 0 rgba(0,0,0,.22);
+  white-space:nowrap;
+}
+.result-title,
+.result-hero h2.result-title{
+  font-family:'Black Han Sans',sans-serif;
+  font-size:30px;
+  line-height:1.05;
+  letter-spacing:-.2px;
+  color:var(--gold);
+  margin-top:10px;
+  text-shadow:0 2px 0 rgba(0,0,0,.22);
+}
+.mode-title{
+  font-size:34px;
+  text-shadow:0 2px 0 rgba(0,0,0,.22);
+}
+
+/* 홈 배치: 버튼 기준선 정렬 + 타이틀 확대/하향 */
+.home-title-wrap{
+  left:6%;
+  top:calc(3.6% + 20px);
+  width:88%;
+}
+#btn-home-time,
+#btn-home-practice{
+  left:15%;
+  width:70%;
+}
+#btn-home-time{top:60.2%;}
+#btn-home-practice{top:69.9%;}
+#btn-home-wrong,
+#btn-home-settings{
+  top:80.5%;
+  width:34.5%;
+}
+#btn-home-wrong{left:15%;}
+#btn-home-settings{left:50.5%;}
+
+/* 실전 안내 팝업 */
+.time-intro-card{
+  gap:8px;
+  padding:18px 16px;
+  color:#dce7ff;
+  line-height:1.7;
+  font-size:14px;
+  font-weight:700;
+}
+.time-intro-card p{margin:0;}
+
+/* 모드 화면 상단 여백 + 장식바 */
+#page-play{
+  padding-top:24px;
+}
+.play-flow::before{
+  content:"";
+  display:block;
+  height:5px;
+  width:74%;
+  align-self:center;
+  margin:0 auto 4px;
+  border-radius:999px;
+  background:linear-gradient(90deg, transparent, rgba(245,200,66,.44), rgba(255,225,141,.72), rgba(245,200,66,.44), transparent);
+  box-shadow:0 0 14px rgba(245,200,66,.16);
+  flex-shrink:0;
+}
+
+/* 플레이 슬롯 UI: 점선 제거 + 밝은 골드/크림 중심으로 단순화 */
+.game-shell{
+  background:linear-gradient(180deg,#ffd866 0%,#f1ba32 42%,#c98216 100%);
+  border:2px solid rgba(111,72,13,.38);
+  box-shadow:
+    inset 0 3px 0 rgba(255,255,255,.48),
+    inset 0 -4px 0 rgba(105,61,8,.20),
+    0 12px 22px rgba(0,0,0,.22);
+}
+.game-shell::before{
+  display:none !important;
+}
+.exam-chip{
+  background:linear-gradient(180deg,#6b542d,#40341f);
+  border:1px solid rgba(255,235,178,.28);
+  color:#fff0b6;
+  box-shadow:0 6px 12px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.12);
+}
+.shell-hint{
+  color:#fff6cf;
+  opacity:.96;
+  text-shadow:0 1px 0 rgba(84,48,7,.4);
+}
+.slot{
+  background:linear-gradient(180deg,#fff8df 0%,#f5e6be 100%);
+  border:2px solid rgba(112,76,20,.42);
+  box-shadow:
+    inset 0 2px 9px rgba(255,255,255,.34),
+    inset 0 -2px 6px rgba(105,65,12,.08),
+    0 4px 9px rgba(76,42,5,.12);
+}
+.slot.spinning{
+  border-color:rgba(112,76,20,.32);
+  background:linear-gradient(180deg,#fff5d3 0%,#ecd8a8 100%);
+}
+.slot.stopped{
+  border-color:#e6b936;
+  background:linear-gradient(180deg,#fff9e7 0%,#f7e7bd 100%);
+  box-shadow:0 0 14px rgba(245,200,66,.24), inset 0 2px 9px rgba(255,255,255,.34);
+}
+.slot-lbl{color:#75613b;}
+.slot-val{color:#2d2110;font-weight:800;}
+
+/* 결과창 최고기록 강조 */
+.stat-card .sc-sub.best-sub,
+.stat-card .sc-sub:has(#r-best){
+  font-size:13px;
+  line-height:1.25;
+}
+#r-best .best-num{
+  color:#ff5b5b;
+  font-family:'Orbitron',sans-serif;
+  font-size:1.05em;
+  font-weight:800;
+}
+
+/* 모바일 STOP 존재감 강화 */
+@media (max-width:700px){
+  .home-title-wrap{
+    left:3.8%;
+    top:calc(3% + 20px);
+    width:92.4%;
+  }
+  #btn-home-time,
+  #btn-home-practice{
+    left:15%;
+    width:70%;
+  }
+  #btn-home-time{top:60.2%;}
+  #btn-home-practice{top:69.9%;}
+  #btn-home-wrong,
+  #btn-home-settings{
+    top:80.5%;
+    width:34.5%;
+  }
+  #btn-home-wrong{left:15%;}
+  #btn-home-settings{left:50.5%;}
+
+  #page-play{
+    padding-top:18px;
+  }
+  .play-flow::before{
+    height:4px;
+    margin-bottom:3px;
+  }
+  .mode-title{
+    font-size:27px;
+    line-height:1.04;
+  }
+  .modal-title,
+  .setup-title.modal-title{
+    font-size:25px;
+  }
+  .result-title,
+  .result-hero h2.result-title{
+    font-size:30px;
+  }
+  #btn-stop{
+    height:58px;
+    min-height:58px;
+    font-size:21px;
+    border-radius:18px;
+    background:linear-gradient(135deg,#ff7a1a,#dc2626);
+    box-shadow:0 10px 26px rgba(249,115,22,.48), 0 0 26px rgba(249,115,22,.18);
+  }
+}
+
+@media (max-width:380px){
+  .home-title-wrap{
+    top:calc(2.6% + 18px);
+  }
+  #btn-home-time{top:60.2%;}
+  #btn-home-practice{top:69.9%;}
+  #btn-home-wrong,#btn-home-settings{top:80.5%;width:34.5%;}
+  #btn-home-wrong{left:15%;}
+  #btn-home-settings{left:50.5%;}
+}
