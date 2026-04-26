@@ -470,17 +470,20 @@ function setMobileControlsActive(active, mode = "submit") {
   const mobile = isMobileView();
   const zone = $("answer-zone");
   if (!zone) return;
+  zone.classList.toggle("mode-stop", mobile && mode === "stop");
+  zone.classList.toggle("mode-submit", mobile && mode === "submit");
   zone.classList.toggle("is-disabled", mobile && !active);
   if (mobile) {
-    show("input-row", true);
-    show("mobile-keypad", true);
-    show("btn-submit", mode === "submit");
+    const isSubmit = mode === "submit";
+    show("input-row", isSubmit);
+    show("mobile-keypad", isSubmit);
+    show("btn-submit", isSubmit);
     show("btn-stop", mode === "stop");
-    $("btn-submit").disabled = !active;
+    $("btn-submit").disabled = !active || !isSubmit;
     $("ans").readOnly = true;
     $("ans").blur();
   } else {
-    zone.classList.remove("is-disabled");
+    zone.classList.remove("mode-stop", "mode-submit", "is-disabled");
     $("btn-submit").disabled = !active;
   }
 }
@@ -501,7 +504,7 @@ function startRound() {
   $("ans").className = "ans-input";
   $("ans").placeholder = "숫자 입력";
   setText("answer-guide", "");
-  setMobileControlsActive(false, "stop");
+  setMobileControlsActive(true, "stop");
   if (!isMobileView()) {
     show("input-row", false);
     show("mobile-keypad", false);
