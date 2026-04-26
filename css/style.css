@@ -791,3 +791,212 @@ body::before{
   #btn-home-practice{top:69.7% !important;}
   #btn-home-wrong,#btn-home-settings{top:81.8% !important;}
 }
+
+/* v1.2-11 refinements */
+/* 1) 홈 화면은 모드 화면용 상단 여백의 영향을 받지 않고 위에서 바로 시작 */
+.image-home-page,
+#page-home.image-home-page{
+  padding-top:0 !important;
+  justify-content:flex-start !important;
+  align-items:center !important;
+}
+@media (max-width:700px){
+  #page-home.image-home-page{padding:0 !important;}
+  #page-home .home-stage{
+    margin-top:0 !important;
+    align-self:flex-start !important;
+  }
+}
+
+/* 2) 홈 버튼 세로 위치 재조정: 크기/좌우 기준선은 유지, 줄 간격만 자연스럽게 벌림 */
+#btn-home-time{top:calc(59.2% + 8px) !important;}
+#btn-home-practice{top:calc(69.4% + 17px) !important;}
+#btn-home-wrong,
+#btn-home-settings{top:calc(81.4% + 24px) !important;}
+@media (max-width:700px){
+  #btn-home-time{top:calc(59.2% + 8px) !important;}
+  #btn-home-practice{top:calc(69.4% + 17px) !important;}
+  #btn-home-wrong,
+  #btn-home-settings{top:calc(81.4% + 24px) !important;}
+}
+@media (max-width:380px){
+  #btn-home-time{top:calc(59.4% + 7px) !important;}
+  #btn-home-practice{top:calc(69.7% + 16px) !important;}
+  #btn-home-wrong,
+  #btn-home-settings{top:calc(81.8% + 22px) !important;}
+}
+
+/* 3) 모드 화면 상단 장식바 제거: 공간은 유지하고 시각 장식만 숨김 */
+.play-flow::before{
+  background:transparent !important;
+  box-shadow:none !important;
+  opacity:0 !important;
+}
+
+/* 4) 실전모드 시간 진행 바 강화 + 폭탄 마커 */
+.pbar-track{
+  position:relative;
+  overflow:visible !important;
+  height:12px !important;
+  margin-bottom:14px;
+}
+.pbar-fill{
+  position:relative;
+  min-width:0;
+}
+.pbar-track.time-mode .pbar-fill::after{
+  content:"💣";
+  position:absolute;
+  right:0;
+  top:50%;
+  transform:translate(42%,-52%);
+  font-size:15px;
+  line-height:1;
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,.35));
+  z-index:3;
+  pointer-events:none;
+}
+.pbar-track.time-mode .pbar-fill[style*="0%"]::after{transform:translate(6%,-52%);}
+@media (max-width:700px){
+  .pbar-track{height:12px !important;margin-bottom:clamp(8px,1.1svh,12px) !important;}
+  .pbar-track.time-mode .pbar-fill::after{font-size:14px;}
+}
+
+/* 5) 모바일 실전 종료창: 오답은 2개 높이까지만 보이고, 하단 버튼은 항상 표시 */
+@media (max-width:700px){
+  #page-result{
+    height:100svh !important;
+    overflow:hidden !important;
+    justify-content:flex-start !important;
+    padding:clamp(8px,1.1svh,12px) 14px calc(8px + env(safe-area-inset-bottom,0px)) !important;
+  }
+  #page-result .result-layout{
+    height:100% !important;
+    min-height:0 !important;
+    display:grid !important;
+    grid-template-rows:auto auto auto minmax(0, 172px) auto !important;
+    gap:clamp(6px,.75svh,9px) !important;
+  }
+  #page-result .result-hero{
+    padding:clamp(13px,1.8svh,18px) 12px !important;
+    border-radius:18px !important;
+  }
+  #page-result .trophy-icon{font-size:clamp(38px,4.8svh,46px) !important;}
+  #page-result .result-title,
+  #page-result .result-hero h2.result-title{
+    font-size:clamp(28px,3.8svh,32px) !important;
+    margin-top:4px !important;
+  }
+  #page-result .result-hero p{font-size:12px !important;margin-top:3px !important;}
+  #page-result .new-badge{margin-top:7px !important;padding:5px 13px !important;font-size:12px !important;}
+  #page-result .stats-grid{gap:6px !important;}
+  #page-result .stat-card{padding:clamp(7px,1svh,10px) 8px !important;border-radius:14px !important;}
+  #page-result .result-mini-grid{gap:6px !important;}
+  #page-result .result-wrong-panel{
+    min-height:0 !important;
+    height:172px !important;
+    max-height:172px !important;
+    padding:9px 10px !important;
+    display:flex !important;
+    flex-direction:column !important;
+    overflow:hidden !important;
+  }
+  #page-result .result-wrong-panel .section-head{margin-bottom:6px !important;flex-shrink:0 !important;}
+  #page-result .result-wrong-panel .list-scroll{
+    flex:1 1 auto !important;
+    min-height:0 !important;
+    height:auto !important;
+    max-height:none !important;
+    overflow-y:auto !important;
+    padding-right:2px;
+  }
+  #page-result .note-item{
+    min-height:52px !important;
+    padding:7px 9px !important;
+    border-radius:11px !important;
+    margin-bottom:7px !important;
+  }
+  #page-result .note-item .txt{font-size:11px !important;line-height:1.35 !important;}
+  #page-result .note-item .txt strong{font-size:12px !important;}
+  #page-result .note-item .ans{font-size:14px !important;}
+  #page-result .btn-row.equal{
+    gap:8px !important;
+    flex-shrink:0 !important;
+  }
+  #page-result .btn-row.equal .btn{
+    height:clamp(44px,5.8svh,50px) !important;
+    font-size:14px !important;
+    border-radius:14px !important;
+  }
+}
+
+/* 6) 모바일 플레이 화면: 화면 높이 기준으로 간격을 자동 조정해 빈 공간을 줄임 */
+@media (max-width:700px){
+  :root{--mobile-answer-zone-h:clamp(204px,28svh,232px);}
+  html,body{height:100%;overflow:hidden;}
+  #app{height:100svh;min-height:100svh;overflow:hidden;}
+  #page-play{
+    height:100svh !important;
+    overflow:hidden !important;
+    padding:clamp(12px,1.7svh,18px) 14px calc(var(--mobile-answer-zone-h) + env(safe-area-inset-bottom,0px)) !important;
+  }
+  #page-play .play-flow{
+    height:calc(100svh - var(--mobile-answer-zone-h) - clamp(24px,3.4svh,36px)) !important;
+    min-height:0 !important;
+    gap:clamp(6px,.85svh,10px) !important;
+    justify-content:space-between;
+  }
+  .play-topbar{flex-shrink:0;}
+  .game-hero{
+    padding:clamp(11px,1.45svh,15px) !important;
+    flex-shrink:0;
+  }
+  .status-grid{gap:clamp(6px,.9svh,8px) !important;margin-bottom:clamp(7px,1svh,10px) !important;}
+  .status-box{min-height:clamp(58px,7.4svh,66px) !important;padding:8px 10px !important;}
+  .game-shell{padding:clamp(9px,1.2svh,12px) !important;}
+  .shell-topbar{margin-bottom:clamp(7px,1svh,10px) !important;}
+  .slot{height:clamp(82px,11svh,96px) !important;}
+  .play-answer-guide{
+    min-height:clamp(16px,2.2svh,20px) !important;
+    font-size:clamp(11px,1.55svh,12px) !important;
+    margin:0 !important;
+    flex-shrink:0;
+  }
+  .feedback{
+    min-height:clamp(36px,4.6svh,44px) !important;
+    padding:7px 10px !important;
+    font-size:13px !important;
+    flex-shrink:0;
+  }
+  .feedback.hidden{display:none !important;}
+  .q-text{
+    min-height:clamp(62px,8.6svh,76px) !important;
+    padding:9px 12px !important;
+    font-size:clamp(13px,1.85svh,15px) !important;
+    flex-shrink:0;
+  }
+  .answer-zone{
+    min-height:var(--mobile-answer-zone-h) !important;
+    padding:5px 14px calc(env(safe-area-inset-bottom,0px) + 6px) !important;
+  }
+  .input-row{gap:7px !important;}
+  .ans-input,
+  .unit-tag{height:clamp(48px,6.4svh,56px) !important;}
+  .mobile-keypad{gap:clamp(5px,.75svh,7px) !important;}
+  .keypad-btn{height:clamp(30px,4.15svh,38px) !important;font-size:clamp(18px,2.8svh,23px) !important;}
+  #btn-submit,#btn-stop{height:clamp(48px,6.5svh,56px) !important;}
+}
+
+/* 7) 설정 설명문 짧은 문구 기준으로 잘리지 않게 안정화 */
+.setting-card .meta span{
+  line-height:1.45 !important;
+  word-break:keep-all;
+  overflow:visible !important;
+}
+.setting-card .toggle-row{
+  align-items:center !important;
+}
+@media (max-width:700px){
+  .setting-card .meta span{font-size:13px !important;line-height:1.42 !important;}
+  .setting-card .toggle-row{padding:14px 14px !important;}
+}
