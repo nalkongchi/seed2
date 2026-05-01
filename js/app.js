@@ -408,7 +408,11 @@ function updatePlayHeader() {
 
 function updateStatus() {
   const pbarTrack = document.getElementById("pbar")?.parentElement;
-  if (pbarTrack) pbarTrack.classList.toggle("time-mode", state.mode === "time");
+  if (pbarTrack) {
+    const isTimeMode = state.mode === "time";
+    pbarTrack.classList.toggle("time-mode", isTimeMode);
+    pbarTrack.classList.toggle("is-hidden", !isTimeMode);
+  }
   if (state.mode === "time") {
     setText("status-1-lbl", "남은 시간");
     setText("status-1-val", formatTime(state.timeLeft));
