@@ -874,11 +874,11 @@ body::before{
     height:100% !important;
     min-height:0 !important;
     display:grid !important;
-    grid-template-rows:auto auto auto minmax(0, 172px) auto !important;
-    gap:clamp(6px,.75svh,9px) !important;
+    grid-template-rows:auto auto auto minmax(0, clamp(186px,24.5svh,214px)) auto !important;
+    gap:clamp(5px,.62svh,8px) !important;
   }
   #page-result .result-hero{
-    padding:clamp(13px,1.8svh,18px) 12px !important;
+    padding:clamp(12px,1.65svh,16px) 12px !important;
     border-radius:18px !important;
   }
   #page-result .trophy-icon{font-size:clamp(38px,4.8svh,46px) !important;}
@@ -888,35 +888,35 @@ body::before{
     margin-top:4px !important;
   }
   #page-result .result-hero p{font-size:12px !important;margin-top:3px !important;}
-  #page-result .new-badge{margin-top:7px !important;padding:5px 13px !important;font-size:12px !important;}
-  #page-result .stats-grid{gap:6px !important;}
-  #page-result .stat-card{padding:clamp(7px,1svh,10px) 8px !important;border-radius:14px !important;}
-  #page-result .result-mini-grid{gap:6px !important;}
+  #page-result .new-badge{margin-top:6px !important;padding:5px 13px !important;font-size:12px !important;}
+  #page-result .stats-grid{gap:5px !important;}
+  #page-result .stat-card{padding:clamp(6px,.86svh,9px) 8px !important;border-radius:14px !important;}
+  #page-result .result-mini-grid{gap:5px !important;}
   #page-result .result-wrong-panel{
     min-height:0 !important;
-    height:172px !important;
-    max-height:172px !important;
-    padding:9px 10px !important;
+    height:clamp(186px,24.5svh,214px) !important;
+    max-height:clamp(186px,24.5svh,214px) !important;
+    padding:8px 10px !important;
     display:flex !important;
     flex-direction:column !important;
     overflow:hidden !important;
   }
-  #page-result .result-wrong-panel .section-head{margin-bottom:6px !important;flex-shrink:0 !important;}
+  #page-result .result-wrong-panel .section-head{margin-bottom:5px !important;flex-shrink:0 !important;}
   #page-result .result-wrong-panel .list-scroll{
     flex:1 1 auto !important;
     min-height:0 !important;
     height:auto !important;
     max-height:none !important;
     overflow-y:auto !important;
-    padding-right:2px;
+    padding-right:2px !important;
   }
   #page-result .note-item{
-    min-height:52px !important;
-    padding:7px 9px !important;
+    min-height:56px !important;
+    padding:8px 9px !important;
     border-radius:11px !important;
-    margin-bottom:7px !important;
+    margin-bottom:6px !important;
   }
-  #page-result .note-item .txt{font-size:11px !important;line-height:1.35 !important;}
+  #page-result .note-item .txt{font-size:11px !important;line-height:1.3 !important;}
   #page-result .note-item .txt strong{font-size:12px !important;}
   #page-result .note-item .ans{font-size:14px !important;}
   #page-result .btn-row.equal{
@@ -1062,9 +1062,13 @@ body::before{
 .pbar-track.time-mode .pbar-fill::after{content:none !important;display:none !important;}
 
 @media (max-width:700px){
-  #page-result .result-layout{grid-template-rows:auto auto auto minmax(0, 138px) auto !important;gap:clamp(6px,.7svh,8px) !important;}
-  #page-result .result-hero{padding:clamp(15px,2svh,20px) 12px !important;}
-  #page-result .result-wrong-panel{height:138px !important;max-height:138px !important;min-height:0 !important;}
+  #page-result .result-layout{grid-template-rows:auto auto auto minmax(0, clamp(196px,26svh,226px)) auto !important;gap:clamp(4px,.56svh,7px) !important;}
+  #page-result .result-hero{padding:clamp(11px,1.45svh,14px) 12px !important;}
+  #page-result .stats-grid{gap:4px !important;}
+  #page-result .stat-card{padding:clamp(5px,.7svh,8px) 8px !important;}
+  #page-result .result-mini-grid{gap:4px !important;}
+  #page-result .result-wrong-panel{height:clamp(196px,26svh,226px) !important;max-height:clamp(196px,26svh,226px) !important;min-height:0 !important;padding:7px 10px !important;}
+  #page-result .result-wrong-panel .section-head{margin-bottom:4px !important;}
   #page-result .result-wrong-panel .list-scroll{overflow-y:auto !important;}
-  #page-result .note-item{min-height:52px !important;margin-bottom:7px !important;}
+  #page-result .note-item{min-height:58px !important;margin-bottom:5px !important;padding:8px 9px !important;}
 }
