@@ -717,8 +717,8 @@ function launchConfetti() {
     piece.className = "confetti-piece";
     const left = Math.random() * 100;
     const drift = (Math.random() * 2 - 1) * 24;
-    const delay = Math.random() * 260;
-    const duration = 1500 + Math.random() * 450;
+    const delay = Math.random() * 420;
+    const duration = 2600 + Math.random() * 900;
     const size = 6 + Math.random() * 6;
     piece.style.left = `${left}%`;
     piece.style.top = `${-8 - Math.random() * 16}%`;
@@ -731,7 +731,7 @@ function launchConfetti() {
     layer.appendChild(piece);
   }
   host.appendChild(layer);
-  setTimeout(() => layer.remove(), 2100);
+  setTimeout(() => layer.remove(), 4300);
 }
 
 function renderResultWrongs() {
