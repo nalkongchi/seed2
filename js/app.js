@@ -698,9 +698,40 @@ function finishTimeMode() {
   setText("r-wrong", String(state.wrong));
   renderResultWrongs();
   showPage("result", { syncBgm: false });
+  if (isNew) launchConfetti();
   setTimeout(() => {
     if ($("page-result")?.classList.contains("active")) playBgm("bgm-home");
   }, 750);
+}
+
+function launchConfetti() {
+  const host = $("page-result");
+  if (!host) return;
+  host.querySelectorAll(".confetti-layer").forEach(node => node.remove());
+  const layer = document.createElement("div");
+  layer.className = "confetti-layer";
+  const colors = ["#f5c842", "#61e88e", "#6ec9ff", "#ff7d9f", "#ffffff", "#b89bff"];
+  const count = 32;
+  for (let i = 0; i < count; i += 1) {
+    const piece = document.createElement("span");
+    piece.className = "confetti-piece";
+    const left = Math.random() * 100;
+    const drift = (Math.random() * 2 - 1) * 24;
+    const delay = Math.random() * 260;
+    const duration = 1500 + Math.random() * 450;
+    const size = 6 + Math.random() * 6;
+    piece.style.left = `${left}%`;
+    piece.style.top = `${-8 - Math.random() * 16}%`;
+    piece.style.width = `${size}px`;
+    piece.style.height = `${size * (0.58 + Math.random() * 0.42)}px`;
+    piece.style.background = colors[i % colors.length];
+    piece.style.setProperty("--drift", `${drift}px`);
+    piece.style.animationDelay = `${delay}ms`;
+    piece.style.animationDuration = `${duration}ms`;
+    layer.appendChild(piece);
+  }
+  host.appendChild(layer);
+  setTimeout(() => layer.remove(), 2100);
 }
 
 function renderResultWrongs() {

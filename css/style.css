@@ -1072,3 +1072,53 @@ body::before{
   #page-result .result-wrong-panel .list-scroll{overflow-y:auto !important;}
   #page-result .note-item{min-height:58px !important;margin-bottom:5px !important;padding:8px 9px !important;}
 }
+
+/* v1.2-14 refinements */
+@media (max-width:700px){
+  #page-result .result-layout{
+    grid-template-rows:minmax(0, 1.26fr) minmax(0, .78fr) minmax(0, .7fr) minmax(0, clamp(196px,26svh,226px)) auto !important;
+    gap:clamp(4px,.56svh,7px) !important;
+  }
+  #page-result .result-hero{
+    padding:clamp(14px,1.95svh,19px) 12px !important;
+    display:flex !important;
+    flex-direction:column !important;
+    justify-content:center !important;
+  }
+  #page-result .result-hero .trophy-icon{margin-bottom:2px !important;}
+  #page-result .result-hero h2.result-title{margin-top:6px !important;}
+  #page-result .result-hero p{margin-top:4px !important;}
+  #page-result .new-badge{margin-top:8px !important;}
+  #page-result .stats-grid{gap:4px !important;}
+  #page-result .stats-grid .stat-card{padding:clamp(4px,.62svh,7px) 8px !important;}
+  #page-result .stats-grid .stat-card .sc-sub{margin-top:2px !important;}
+  #page-result .result-mini-grid{gap:4px !important;}
+  #page-result .result-mini-grid .stat-card{padding:clamp(5px,.68svh,7px) 6px !important;}
+  #page-result .result-mini-grid .sc-sub{margin-top:1px !important;}
+  #page-result .result-wrong-panel{
+    height:clamp(196px,26svh,226px) !important;
+    max-height:clamp(196px,26svh,226px) !important;
+  }
+  #page-result .result-wrong-panel .list-scroll{overflow-y:auto !important;}
+  #page-result .btn-row.equal{flex-shrink:0 !important;}
+}
+
+#page-result .confetti-layer{
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  overflow:hidden;
+  z-index:8;
+}
+#page-result .confetti-piece{
+  position:absolute;
+  border-radius:2px;
+  opacity:.96;
+  animation:confettiFall 1.8s cubic-bezier(.2,.8,.2,1) forwards;
+  will-change:transform,opacity;
+}
+@keyframes confettiFall{
+  0%{transform:translate3d(0,-14px,0) rotate(0deg);opacity:0;}
+  10%{opacity:.98;}
+  100%{transform:translate3d(var(--drift, 0px),112svh,0) rotate(560deg);opacity:0;}
+}
