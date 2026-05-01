@@ -481,87 +481,81 @@ body::before{
 }
 @media (max-width:380px){.home-title-wrap{top:calc(2.8% + 18px) !important;}#btn-home-time{top:calc(59.4% + 7px) !important;}#btn-home-practice{top:calc(69.7% + 16px) !important;}#btn-home-wrong,#btn-home-settings{top:calc(79.9% + 24px) !important;}.modal-window{width:min(100%,360px);padding:16px;}.play-topbar .pill,.top-home-btn{min-height:34px;height:34px;}.mode-title{font-size:25px;}.modal-title,.setup-title.modal-title{font-size:25px;}#page-result .result-layout{grid-template-rows:minmax(190px,1fr) clamp(108px,14.5svh,132px) clamp(92px,12.4svh,114px) clamp(184px,25.5svh,210px) clamp(48px,6.2svh,56px) !important;}}
 
-
-/* v1.2-17 fixes: mobile play feedback toast + non-time progress bar hide
-   - 결과 피드백은 레이아웃을 밀지 않는 토스트로 표시
-   - 하단 입력/키패드/제출 영역은 고정 유지
-   - 연습/오답풀이 모드에서는 진행바를 숨김 */
-.pbar-track.is-hidden{
-  display:none !important;
-}
-
+/* v1.2-17 play-screen emergency fix
+   - 하단 입력/키패드 영역은 그대로 유지
+   - feedback은 레이아웃을 밀지 않는 토스트로 분리
+   - 문제 카드가 입력칸을 덮지 않도록 row 구조를 재정리 */
 @media (max-width:700px){
   #page-play{
-    position:relative !important;
-    --answer-zone-h:clamp(238px,32svh,292px);
+    --answer-zone-h:clamp(238px,32svh,292px) !important;
   }
-
   #page-play .play-flow{
     display:grid !important;
-    grid-template-rows:
-      auto
-      auto
-      auto
-      minmax(clamp(62px,8svh,78px), clamp(76px,9.5svh,92px))
-      minmax(0,var(--answer-zone-h)) !important;
+    grid-template-rows:auto auto auto auto minmax(0,var(--answer-zone-h)) !important;
     gap:clamp(3px,.48svh,6px) !important;
     align-content:start !important;
     overflow:hidden !important;
+    position:relative !important;
   }
-
   #page-play .play-topbar{grid-row:1 !important;}
   #page-play .game-hero{grid-row:2 !important;}
   #page-play .play-answer-guide{
     grid-row:3 !important;
-    margin:0 0 clamp(2px,.3svh,4px) !important;
+    margin:0 !important;
     min-height:clamp(16px,2.1svh,20px) !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
   }
   #page-play .q-text{
     grid-row:4 !important;
     margin:0 !important;
-    z-index:2;
+    transform:translateY(-8px) !important;
+    position:relative !important;
+    z-index:2 !important;
+    min-height:clamp(58px,7.4svh,74px) !important;
+    max-height:clamp(72px,9svh,88px) !important;
+    padding:8px 12px !important;
+    overflow:hidden !important;
   }
   #page-play .answer-zone{
     grid-row:5 !important;
     position:relative !important;
-    left:auto !important;
-    right:auto !important;
-    bottom:auto !important;
-    width:100% !important;
+    z-index:1 !important;
     height:var(--answer-zone-h) !important;
     min-height:var(--answer-zone-h) !important;
-    z-index:3 !important;
     margin:0 !important;
+    padding:clamp(4px,.7svh,7px) 0 0 !important;
   }
-
-  /* 정답/오답 결과바: 문서 흐름에서 제외해 키패드/문제칸을 밀지 않음 */
   #page-play .feedback{
-    position:absolute !important;
+    position:fixed !important;
     left:14px !important;
     right:14px !important;
-    bottom:calc(var(--answer-zone-h) + clamp(78px,9.8svh,94px) + clamp(5px,.7svh,8px)) !important;
-    z-index:12 !important;
-    min-height:clamp(34px,4.6svh,42px) !important;
-    padding:7px 12px !important;
+    bottom:calc(var(--answer-zone-h) + env(safe-area-inset-bottom,0px) + 6px) !important;
+    z-index:35 !important;
+    min-height:34px !important;
+    max-height:42px !important;
+    padding:6px 12px !important;
     border-radius:14px !important;
-    margin:0 !important;
+    font-size:13px !important;
+    line-height:1.15 !important;
     display:flex !important;
     align-items:center !important;
     justify-content:center !important;
+    white-space:normal !important;
     pointer-events:none !important;
-    white-space:nowrap !important;
-    overflow:hidden !important;
-    text-overflow:ellipsis !important;
-    box-shadow:0 8px 18px rgba(0,0,0,.18);
+    box-shadow:0 10px 24px rgba(0,0,0,.24) !important;
   }
   #page-play .feedback.hidden{
     display:none !important;
     visibility:hidden !important;
   }
-
-  /* 연습/오답풀이에서 진행바가 사라져도 카드 여백이 과하게 남지 않도록 보정 */
-  #page-play .pbar-track.is-hidden{
-    display:none !important;
-    margin:0 !important;
+  #page-play .feedback .criteria{
+    display:inline-block !important;
+    max-width:calc(100vw - 120px) !important;
+    overflow:hidden !important;
+    text-overflow:ellipsis !important;
+    white-space:nowrap !important;
+    vertical-align:bottom !important;
   }
 }
