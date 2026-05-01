@@ -1062,9 +1062,13 @@ body::before{
 .pbar-track.time-mode .pbar-fill::after{content:none !important;display:none !important;}
 
 @media (max-width:700px){
-  #page-result .result-layout{grid-template-rows:auto auto auto minmax(0, 138px) auto !important;gap:clamp(6px,.7svh,8px) !important;}
-  #page-result .result-hero{padding:clamp(15px,2svh,20px) 12px !important;}
-  #page-result .result-wrong-panel{height:138px !important;max-height:138px !important;min-height:0 !important;}
+  #page-result .result-layout{grid-template-rows:auto auto auto minmax(0, clamp(196px,26svh,226px)) auto !important;gap:clamp(4px,.56svh,7px) !important;}
+  #page-result .result-hero{padding:clamp(11px,1.45svh,14px) 12px !important;}
+  #page-result .stats-grid{gap:4px !important;}
+  #page-result .stat-card{padding:clamp(5px,.7svh,8px) 8px !important;}
+  #page-result .result-mini-grid{gap:4px !important;}
+  #page-result .result-wrong-panel{height:clamp(196px,26svh,226px) !important;max-height:clamp(196px,26svh,226px) !important;min-height:0 !important;padding:7px 10px !important;}
+  #page-result .result-wrong-panel .section-head{margin-bottom:4px !important;}
   #page-result .result-wrong-panel .list-scroll{overflow-y:auto !important;}
-  #page-result .note-item{min-height:52px !important;margin-bottom:7px !important;}
+  #page-result .note-item{min-height:58px !important;margin-bottom:5px !important;padding:8px 9px !important;}
 }
