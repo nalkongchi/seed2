@@ -599,3 +599,139 @@ body::before{
   #page-play .feedback{font-size:11px !important;padding:4px 8px !important;}
   #page-play .q-text{min-height:clamp(60px,7.8svh,74px) !important;max-height:clamp(66px,8.6svh,82px) !important;}
 }
+
+/* v1.2-20 play input layout correction
+   - 문제 카드(q-text)를 소수 자리 안내보다 위로 이동
+   - 소수 자리 안내를 문제 카드 아래에 배치
+   - 정답/오답 feedback을 answer-zone 내부, 입력칸 바로 위에 배치
+   - 숫자 키패드/제출 버튼은 하단 위치 유지 */
+@media (max-width:700px){
+  #page-play{
+    --answer-zone-h:clamp(306px,37.5svh,338px) !important;
+  }
+  #page-play .play-flow{
+    display:grid !important;
+    height:100% !important;
+    min-height:0 !important;
+    grid-template-rows:
+      auto
+      auto
+      clamp(66px,8.5svh,84px)
+      clamp(18px,2.35svh,24px)
+      minmax(0,var(--answer-zone-h)) !important;
+    gap:clamp(3px,.48svh,6px) !important;
+    align-content:start !important;
+    overflow:hidden !important;
+    position:relative !important;
+  }
+  #page-play .play-topbar{grid-row:1 !important;}
+  #page-play .game-hero{grid-row:2 !important;}
+  #page-play .q-text{
+    grid-row:3 !important;
+    position:relative !important;
+    z-index:1 !important;
+    margin:0 !important;
+    transform:none !important;
+    min-height:clamp(66px,8.5svh,84px) !important;
+    max-height:clamp(78px,9.8svh,94px) !important;
+    padding:8px 12px !important;
+    overflow:hidden !important;
+  }
+  #page-play .play-answer-guide{
+    grid-row:4 !important;
+    margin:0 !important;
+    min-height:clamp(18px,2.35svh,24px) !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    text-align:center !important;
+  }
+  #page-play .answer-zone{
+    grid-row:5 !important;
+    position:relative !important;
+    left:auto !important;
+    right:auto !important;
+    top:auto !important;
+    bottom:auto !important;
+    z-index:1 !important;
+    width:100% !important;
+    height:var(--answer-zone-h) !important;
+    min-height:var(--answer-zone-h) !important;
+    margin:0 !important;
+    padding:clamp(3px,.6svh,6px) 0 0 !important;
+    background:transparent !important;
+    backdrop-filter:none !important;
+    overflow:hidden !important;
+    display:flex !important;
+    flex-direction:column !important;
+    justify-content:flex-end !important;
+    gap:clamp(6px,.85svh,9px) !important;
+  }
+  #page-play .answer-zone .feedback{
+    order:0 !important;
+    position:relative !important;
+    left:auto !important;
+    right:auto !important;
+    top:auto !important;
+    bottom:auto !important;
+    z-index:2 !important;
+    width:100% !important;
+    min-height:clamp(36px,4.8svh,48px) !important;
+    max-height:clamp(46px,5.9svh,58px) !important;
+    margin:0 !important;
+    padding:5px 10px !important;
+    border-radius:13px !important;
+    font-size:clamp(11px,1.65svh,13px) !important;
+    line-height:1.18 !important;
+    display:flex !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:6px !important;
+    flex-wrap:wrap !important;
+    align-content:center !important;
+    white-space:normal !important;
+    pointer-events:none !important;
+    box-shadow:none !important;
+    transform:none !important;
+  }
+  #page-play .answer-zone .feedback.hidden{
+    display:flex !important;
+    visibility:hidden !important;
+    opacity:0 !important;
+  }
+  #page-play .answer-zone .feedback .result-word{
+    flex:0 0 auto !important;
+    white-space:nowrap !important;
+  }
+  #page-play .answer-zone .feedback .criteria{
+    display:block !important;
+    flex:0 1 auto !important;
+    max-width:calc(100vw - 92px) !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    white-space:normal !important;
+    word-break:keep-all !important;
+    line-height:1.18 !important;
+  }
+  #page-play .answer-zone .input-row{order:1 !important;}
+  #page-play .answer-zone .mobile-keypad{order:2 !important;}
+  #page-play .answer-zone #btn-submit{order:3 !important;}
+  #page-play .answer-zone #btn-stop{order:4 !important;}
+  #page-play .answer-zone.mode-stop .feedback{display:none !important;}
+  #page-play .answer-zone.mode-stop .input-row,
+  #page-play .answer-zone.mode-stop .mobile-keypad,
+  #page-play .answer-zone.mode-stop #btn-submit{display:none !important;}
+  #page-play .answer-zone.mode-submit .feedback{display:flex !important;}
+  #page-play .answer-zone.mode-submit .input-row{display:flex !important;}
+  #page-play .answer-zone.mode-submit .mobile-keypad{display:grid !important;}
+  #page-play .answer-zone.mode-submit #btn-submit{display:flex !important;}
+  #page-play .answer-zone.mode-submit #btn-stop{display:none !important;}
+}
+@media (max-width:380px){
+  #page-play{--answer-zone-h:clamp(292px,36.5svh,322px) !important;}
+  #page-play .play-flow{
+    grid-template-rows:auto auto clamp(62px,8.1svh,78px) clamp(17px,2.25svh,22px) minmax(0,var(--answer-zone-h)) !important;
+  }
+  #page-play .answer-zone .feedback{font-size:11px !important;padding:4px 8px !important;}
+  #page-play .q-text{min-height:clamp(62px,8.1svh,78px) !important;max-height:clamp(72px,9.2svh,88px) !important;}
+}
