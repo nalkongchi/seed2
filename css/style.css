@@ -600,6 +600,17 @@ body::before{
   #page-play .q-text{min-height:clamp(60px,7.8svh,74px) !important;max-height:clamp(66px,8.6svh,82px) !important;}
 }
 
+/* v1.2-22 practice setup stage selector */
+#page-practice-setup .stage-grid{grid-template-columns:repeat(3,1fr);gap:8px;}
+#page-practice-setup .stage-item{justify-content:center;gap:6px;padding:10px 7px;min-height:50px;}
+#page-practice-setup .stage-item span{font-size:15px;font-weight:800;white-space:nowrap;}
+#page-practice-setup .stage-item input{width:17px;height:17px;flex-shrink:0;}
+@media (max-width:380px){
+  #page-practice-setup .stage-grid{gap:6px;}
+  #page-practice-setup .stage-item{padding:9px 5px;min-height:48px;}
+  #page-practice-setup .stage-item span{font-size:14px;}
+}
+
 /* v1.2-20 play input layout correction
    - 문제 카드(q-text)를 소수 자리 안내보다 위로 이동
    - 소수 자리 안내를 문제 카드 아래에 배치

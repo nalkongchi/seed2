@@ -1,6 +1,13 @@
 const QUESTION_SET = buildQuestionSet(QUESTION_RULES);
 const EXAM_TYPES = ["포장검사", "종자검사"];
 const CROPS = ["벼", "보리", "밀", "콩", "팥", "트리티케일(사료용)"];
+const STAGE_GROUPS = ["원원종", "원종", "보급종"];
+const STAGE_GROUP_MAP = {
+  "원원종": ["원원종", "원원종포"],
+  "원종": ["원종", "원종포"],
+  "보급종": ["보급종", "보급종포", "채종포 1세대"]
+};
+const EXCLUDED_STAGES = ["채종포 2세대"];
 const STORAGE_KEYS = {
   best: "seedTraining_v1_2_bestTimeAttack",
   wrongs: "seedTraining_v1_2_wrongNotes",
@@ -15,6 +22,7 @@ const MODE_META = {
 const state = {
   mode: null, // time | practice | wrong-practice
   selectedExamTypes: [...EXAM_TYPES],
+  selectedStageGroups: [...STAGE_GROUPS],
   selectedCrops: [...CROPS],
   pool: [],
   curQuestion: null,
@@ -44,6 +52,7 @@ function isMobileView() {
 }
 
 function $(id) { return document.getElementById(id); }
+function isAllowedQuestion(q) { return q && !EXCLUDED_STAGES.includes(q.stage); }
 function showPage(id, opts = {}) {
   document.querySelectorAll(".base-page").forEach(p => p.classList.remove("active"));
   $("page-" + id).classList.add("active");
@@ -251,15 +260,26 @@ function saveBestRecord() {
 
 function renderPracticeOptions() {
   const examGrid = $("examtype-grid");
+  const stageGrid = $("stage-grid");
   const cropGrid = $("crop-grid");
   examGrid.innerHTML = "";
+  if (stageGrid) stageGrid.innerHTML = "";
   cropGrid.innerHTML = "";
+
   EXAM_TYPES.forEach(type => {
     const label = document.createElement("label");
     label.className = "check-item";
     label.innerHTML = `<input type="checkbox" class="exam-check" value="${type}" checked><span>${type}</span>`;
     examGrid.appendChild(label);
   });
+
+  STAGE_GROUPS.forEach(stage => {
+    const label = document.createElement("label");
+    label.className = "check-item stage-item";
+    label.innerHTML = `<input type="checkbox" class="stage-check" value="${stage}" checked><span>${stage}</span>`;
+    stageGrid.appendChild(label);
+  });
+
   CROPS.forEach(crop => {
     const label = document.createElement("label");
     label.className = "check-item";
@@ -273,12 +293,22 @@ function getSelectedValues(selector) {
   return [...document.querySelectorAll(selector)].filter(el => el.checked).map(el => el.value);
 }
 
+function stageMatchesSelectedGroups(stage, selectedGroups) {
+  return selectedGroups.some(group => (STAGE_GROUP_MAP[group] || [group]).includes(stage));
+}
+
 function validatePracticeSelection() {
   const selectedExamTypes = getSelectedValues(".exam-check");
+  const selectedStageGroups = getSelectedValues(".stage-check");
   const selectedCrops = getSelectedValues(".crop-check");
   const messages = [];
   if (selectedExamTypes.length === 0) messages.push("검사종류는 최소 1개 이상 선택해야 해요.");
+  if (selectedStageGroups.length === 0) messages.push("채종단계는 최소 1개 이상 선택해야 해요.");
   if (selectedCrops.length === 0) messages.push("작물은 최소 1개 이상 선택해야 해요.");
+
+  const previewPool = messages.length ? [] : filterQuestions(selectedExamTypes, selectedStageGroups, selectedCrops);
+  if (!messages.length && previewPool.length === 0) messages.push("선택한 범위에 출제할 문제가 없어요. 범위를 다시 선택해 주세요.");
+
   if (messages.length) {
     $("setup-note").innerHTML = messages.join("<br>");
     $("setup-note").classList.add("error");
@@ -287,12 +317,18 @@ function validatePracticeSelection() {
   $("setup-note").textContent = "선택한 범위 안에서 무제한으로 반복 출제됩니다.";
   $("setup-note").classList.remove("error");
   state.selectedExamTypes = selectedExamTypes;
+  state.selectedStageGroups = selectedStageGroups;
   state.selectedCrops = selectedCrops;
   return true;
 }
 
-function filterQuestions(examTypes, crops) {
-  return QUESTION_SET.filter(q => examTypes.includes(q.examType) && crops.includes(q.crop));
+function filterQuestions(examTypes, stageGroups, crops) {
+  return QUESTION_SET.filter(q =>
+    isAllowedQuestion(q) &&
+    examTypes.includes(q.examType) &&
+    crops.includes(q.crop) &&
+    stageMatchesSelectedGroups(q.stage, stageGroups)
+  );
 }
 
 function resetRunCommon() {
@@ -354,7 +390,7 @@ function startTimeMode() {
   prepareAudio();
   closeModal("time-intro");
   state.mode = "time";
-  state.pool = [...QUESTION_SET];
+  state.pool = QUESTION_SET.filter(isAllowedQuestion);
   resetRunCommon();
   updatePlayHeader();
   showPage("play");
@@ -369,7 +405,7 @@ function startPracticeMode() {
   prepareAudio();
   if (!validatePracticeSelection()) return;
   state.mode = "practice";
-  state.pool = filterQuestions(state.selectedExamTypes, state.selectedCrops);
+  state.pool = filterQuestions(state.selectedExamTypes, state.selectedStageGroups, state.selectedCrops);
   resetRunCommon();
   updatePlayHeader();
   closeModal("practice-setup");
@@ -384,8 +420,9 @@ function startWrongPracticeMode() {
     return;
   }
   state.mode = "wrong-practice";
-  state.pool = [...state.wrongNotes];
+  state.pool = state.wrongNotes.filter(isAllowedQuestion);
   state.selectedExamTypes = [...new Set(state.pool.map(q => q.examType))];
+  state.selectedStageGroups = STAGE_GROUPS.filter(group => state.pool.some(q => stageMatchesSelectedGroups(q.stage, [group])));
   state.selectedCrops = [...new Set(state.pool.map(q => q.crop))];
   resetRunCommon();
   updatePlayHeader();
@@ -403,8 +440,9 @@ function updatePlayHeader() {
   const sub = $("play-mode-sub");
   if (state.mode === "practice") {
     const examLine = state.selectedExamTypes.join(", ");
+    const stageLine = state.selectedStageGroups.join(", ");
     const cropLine = state.selectedCrops.join(", ");
-    sub.innerHTML = `<span class="range-line">${examLine}</span><span class="range-line">${cropLine}</span>`;
+    sub.innerHTML = `<span class="range-line">${examLine}</span><span class="range-line">${stageLine}</span><span class="range-line">${cropLine}</span>`;
   } else {
     sub.textContent = meta.sub || "";
   }
@@ -688,6 +726,7 @@ function evaluateAnswer() {
 }
 
 function pushWrongNote(q) {
+  if (!isAllowedQuestion(q)) return;
   const exists = state.wrongNotes.some(item => item.id === q.id);
   if (!exists) {
     state.wrongNotes.unshift(q);
@@ -934,7 +973,7 @@ function bindEvents() {
   });
 
   document.addEventListener("change", (e) => {
-    if (e.target.matches(".exam-check, .crop-check")) validatePracticeSelection();
+    if (e.target.matches(".exam-check, .stage-check, .crop-check")) validatePracticeSelection();
   });
 
   document.querySelectorAll(".modal-layer").forEach(layer => {
