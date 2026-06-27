@@ -29,6 +29,8 @@ const state = {
   timeLeft: 60,
   timeInterval: null,
   nextTimeout: null,
+  ngTimeout: null,
+  scored: false,
   runEnded: false,
   countdownTimer: null,
   audioCtx: null,
@@ -296,12 +298,15 @@ function filterQuestions(examTypes, crops) {
 function resetRunCommon() {
   clearInterval(state.timeInterval);
   clearTimeout(state.nextTimeout);
+  clearTimeout(state.ngTimeout);
   clearInterval(state.countdownTimer);
   state.timeInterval = null;
   state.nextTimeout = null;
+  state.ngTimeout = null;
   state.countdownTimer = null;
   state.curQuestion = null;
   state.spinning = false;
+  state.scored = false;
   state.spinIntervals.forEach(iv => clearInterval(iv));
   state.spinIntervals = [];
   state.correct = 0;
@@ -495,6 +500,7 @@ function formatFeedback(q, isCorrect) {
 
 function startRound() {
   if (state.runEnded) return;
+  state.scored = false;
   state.curQuestion = pickQuestion();
   if (!state.curQuestion) return;
   setText("play-examtype-chip", state.curQuestion.examType);
@@ -551,6 +557,7 @@ function startSpinVisual(targetQ) {
 function stopSpin() {
   if (!state.spinning || state.runEnded) return;
   state.spinning = false;
+  state.scored = false;
   state.spinIntervals.forEach(iv => clearInterval(iv));
   state.spinIntervals = [];
   const q = state.curQuestion;
@@ -605,6 +612,19 @@ function isValidAnswerFormat(raw) {
   return /^\d+(?:\.\d+)?$/.test(raw);
 }
 
+function getDecimalPlaces(value) {
+  const text = String(value).trim();
+  if (!text.includes(".")) return 0;
+  return text.split(".")[1].length;
+}
+function isAnswerCorrect(raw, correctText) {
+  const userNum = Number(raw);
+  const correctNum = Number(correctText);
+  if (!Number.isFinite(userNum) || !Number.isFinite(correctNum)) return false;
+  if (Math.abs(userNum - correctNum) >= 1e-9) return false;
+  return getDecimalPlaces(raw) === getDecimalPlaces(correctText);
+}
+
 function handleKeypadInput(key) {
   const input = $("ans");
   let value = input.value || "";
@@ -622,14 +642,17 @@ function handleKeypadInput(key) {
 
 function evaluateAnswer() {
   if (state.runEnded || !state.curQuestion) return;
+  if (state.scored) return;
   const raw = normalizeAnswer($("ans").value);
   if (raw === "" || !isValidAnswerFormat(raw)) {
     $("ans").classList.add("ng");
-    state.nextTimeout = setTimeout(() => $("ans").classList.remove("ng"), 450);
+    clearTimeout(state.ngTimeout);
+    state.ngTimeout = setTimeout(() => $("ans").classList.remove("ng"), 450);
     return;
   }
   const correctText = String(state.curQuestion.answer);
-  const isCorrect = raw === correctText;
+  const isCorrect = isAnswerCorrect(raw, correctText);
+  state.scored = true;
   state.tries += 1;
   if (isCorrect) {
     state.correct += 1;
@@ -655,6 +678,7 @@ function evaluateAnswer() {
     show("mobile-keypad", false);
     show("input-row", false);
   }
+  clearTimeout(state.nextTimeout);
   state.nextTimeout = setTimeout(() => {
     if (state.runEnded) return;
     if ($("ans").classList.contains("ok")) $("ans").classList.remove("ok");
@@ -675,6 +699,7 @@ function finishTimeMode() {
   state.runEnded = true;
   clearInterval(state.timeInterval);
   clearTimeout(state.nextTimeout);
+  clearTimeout(state.ngTimeout);
   show("btn-stop", false);
   show("btn-submit", false);
   show("mobile-keypad", false);
@@ -798,6 +823,8 @@ function handleQuitPlay() {
   if (!confirm("진행 중인 플레이를 종료하고 홈으로 갈까요?")) return;
   clearInterval(state.timeInterval);
   clearTimeout(state.nextTimeout);
+  clearTimeout(state.ngTimeout);
+  clearTimeout(state.ngTimeout);
   clearInterval(state.countdownTimer);
   state.runEnded = true;
   showPage("home");
@@ -898,9 +925,12 @@ function bindEvents() {
   $("btn-bgm-up").addEventListener("click", () => { maybeBeep("button"); adjustBgmLevel(1); });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !$("btn-submit").classList.contains("hidden")) {
-      evaluateAnswer();
-    }
+    if (e.key !== "Enter") return;
+    const submit = $("btn-submit");
+    if (!submit || submit.classList.contains("hidden") || submit.disabled) return;
+    if ($("answer-zone")?.classList.contains("is-disabled")) return;
+    if (state.scored) return;
+    evaluateAnswer();
   });
 
   document.addEventListener("change", (e) => {
