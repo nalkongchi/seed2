@@ -403,9 +403,9 @@ function getAnswerGuideText(q) {
 
 function getAnswerPlaceholder(q) {
   if (!q) return "숫자 입력";
-  if (q.item === "발아율") return "예) 85";
   const answer = String(q.answer);
   const decimals = answer.includes(".") ? answer.split(".")[1].length : 0;
+  if (decimals === 0) return "예) 0";
   if (decimals === 1) return "예) 0.0";
   if (decimals === 2) return "예) 0.00";
   return "숫자 입력";
