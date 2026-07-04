@@ -386,6 +386,29 @@ function getAnswerGuideText(q) {
   return "숫자로 입력";
 }
 
+function getAnswerPlaceholder(q) {
+  if (!q) return "숫자 입력";
+  if (q.item === "발아율") return "예) 85";
+  const answer = String(q.answer);
+  const decimals = answer.includes(".") ? answer.split(".")[1].length : 0;
+  if (decimals === 1) return "예) 0.0";
+  if (decimals === 2) return "예) 0.00";
+  return "숫자 입력";
+}
+
+function escapeHTML(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatQuestionHTML(q) {
+  return `<span class="q-label">질문</span><span class="q-line q-context"><strong>${escapeHTML(q.examType)}</strong> · <strong>${escapeHTML(q.stage)}</strong> · <strong>${escapeHTML(q.crop)}</strong></span><span class="q-line q-ask"><span class="q-item">${escapeHTML(q.item)}</span> 기준값은?</span>`;
+}
+
 function startTimeMode() {
   prepareAudio();
   closeModal("time-intro");
@@ -433,16 +456,23 @@ function startWrongPracticeMode() {
 
 function updatePlayHeader() {
   const meta = MODE_META[state.mode] || MODE_META.time;
+  const pagePlay = $("page-play");
+  if (pagePlay) {
+    pagePlay.classList.remove("mode-time", "mode-practice", "mode-wrong-practice");
+    pagePlay.classList.add(`mode-${state.mode || "time"}`);
+  }
   setText("play-mode-en", meta.en);
   setText("play-mode-title", meta.title);
   $("play-mode-pill").textContent = meta.pill;
   $("play-mode-pill").classList.remove("hidden");
   const sub = $("play-mode-sub");
   if (state.mode === "practice") {
-    const examLine = state.selectedExamTypes.join(", ");
-    const stageLine = state.selectedStageGroups.join(", ");
-    const cropLine = state.selectedCrops.join(", ");
-    sub.innerHTML = `<span class="range-line">${examLine}</span><span class="range-line">${stageLine}</span><span class="range-line">${cropLine}</span>`;
+    const examLine = state.selectedExamTypes.join("/");
+    const stageLine = state.selectedStageGroups.join("/");
+    const cropLine = state.selectedCrops.join("/");
+    sub.innerHTML = `<span class="range-label">선택 범위</span> <span class="range-line">${escapeHTML(examLine)} · ${escapeHTML(stageLine)} · ${escapeHTML(cropLine)}</span>`;
+  } else if (state.mode === "wrong-practice") {
+    sub.innerHTML = `<span class="range-label">오답 범위</span> <span class="range-line">${escapeHTML(meta.sub || "오답노트에 저장된 문제만 출제")}</span>`;
   } else {
     sub.textContent = meta.sub || "";
   }
@@ -457,7 +487,7 @@ function updateStatus() {
     setText("status-1-val", formatTime(state.timeLeft));
     setText("status-2-lbl", "정답 수");
     setText("status-2-val", String(state.correct));
-    $("pbar").style.width = `${Math.max(0, Math.min(100, ((60 - state.timeLeft) / 60) * 100))}%`;
+    $("pbar").style.width = `${Math.max(0, Math.min(100, (state.timeLeft / 60) * 100))}%`;
   } else {
     setText("status-1-lbl", "맞힘 수");
     setText("status-1-val", String(state.correct));
@@ -610,8 +640,9 @@ function stopSpin() {
     $(id).classList.add("stopped");
   });
   setFeedback("", "");
-  setQuestionText(`<span class="q-line"><strong>${q.examType}</strong> · <strong>${q.stage}</strong> · <strong>${q.crop}</strong></span><span class="q-line"><strong>${q.item}</strong> 기준값은?</span>`);
+  setQuestionText(formatQuestionHTML(q));
   setText("answer-guide", getAnswerGuideText(q));
+  $("ans").placeholder = getAnswerPlaceholder(q);
   show("btn-stop", false);
   show("input-row", true);
   show("mobile-keypad", isMobileView());
