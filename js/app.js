@@ -454,6 +454,16 @@ function startWrongPracticeMode() {
   startRound();
 }
 
+function summarizeSelection(selected, allOptions, allLabel, maxItems) {
+  const items = Array.isArray(selected) ? selected.filter(Boolean) : [];
+  const all = Array.isArray(allOptions) ? allOptions.filter(Boolean) : [];
+  if (!items.length) return "";
+  const isAll = all.length > 0 && items.length === all.length && all.every(item => items.includes(item));
+  if (isAll) return allLabel;
+  if (items.length > maxItems) return `${items.slice(0, maxItems).join("/")} 외 ${items.length - maxItems}`;
+  return items.join("/");
+}
+
 function updatePlayHeader() {
   const meta = MODE_META[state.mode] || MODE_META.time;
   const pagePlay = $("page-play");
@@ -467,9 +477,9 @@ function updatePlayHeader() {
   $("play-mode-pill").classList.remove("hidden");
   const sub = $("play-mode-sub");
   if (state.mode === "practice") {
-    const examLine = state.selectedExamTypes.join("/");
-    const stageLine = state.selectedStageGroups.join("/");
-    const cropLine = state.selectedCrops.join("/");
+    const examLine = summarizeSelection(state.selectedExamTypes, EXAM_TYPES, "전체검사", 2);
+    const stageLine = summarizeSelection(state.selectedStageGroups, STAGE_GROUPS, "전체단계", 3);
+    const cropLine = summarizeSelection(state.selectedCrops, CROPS, "전체작물", 4);
     sub.innerHTML = `<span class="range-label">선택 범위</span> <span class="range-line">${escapeHTML(examLine)} · ${escapeHTML(stageLine)} · ${escapeHTML(cropLine)}</span>`;
   } else if (state.mode === "wrong-practice") {
     sub.innerHTML = `<span class="range-label">오답 범위</span> <span class="range-line">${escapeHTML(meta.sub || "오답노트에 저장된 문제만 출제")}</span>`;
@@ -563,7 +573,8 @@ function setMobileControlsActive(active, mode = "submit") {
 
 function formatFeedback(q, isCorrect) {
   const word = isCorrect ? "정답!" : "오답!";
-  return `<span class="result-word">${word}</span><span class="criteria">${q.item} ${q.stage} ${q.answer}${q.unit || ""}</span>`;
+  const criteria = `${q.item} ${q.stage} ${q.answer}${q.unit || ""}`;
+  return `<span class="result-word">${word}</span><span class="criteria">${escapeHTML(criteria)}</span>`;
 }
 
 function startRound() {
@@ -662,6 +673,7 @@ function setFeedback(msg, cls) {
   if (!msg) {
     el.innerHTML = "";
     el.className = "feedback hidden";
+    $("answer-zone")?.classList.remove("result-feedback");
     return;
   }
   el.innerHTML = msg;
@@ -741,6 +753,8 @@ function evaluateAnswer() {
   updateStatus();
   if (isMobileView()) {
     setMobileControlsActive(false, "submit");
+    $("answer-zone")?.classList.add("result-feedback");
+    show("input-row", false);
     show("btn-submit", true);
   } else {
     show("btn-submit", false);

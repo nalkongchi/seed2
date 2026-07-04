@@ -1057,3 +1057,92 @@ body::before{
   #page-play .q-text{min-height:clamp(72px,9.2svh,88px) !important;max-height:clamp(82px,10.6svh,98px) !important;}
   #page-play .q-text .q-ask{font-size:clamp(15px,2.05svh,17px) !important;}
 }
+
+
+/* v1.2-24 feedback/result and range display fix
+   - 선택 범위가 한 줄에서 잘리지 않도록 짧은 요약 + 2줄 허용
+   - 제출 후 정답/오답 피드백이 입력칸 영역까지 차지
+   - 피드백은 판정어와 세부설명을 줄바꿈으로 표시 */
+#page-play .mode-sub{
+  white-space:normal !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  max-height:none !important;
+  display:flex !important;
+  align-items:flex-start !important;
+  gap:5px !important;
+  line-height:1.18 !important;
+}
+#page-play .mode-sub .range-label{
+  flex:0 0 auto !important;
+  white-space:nowrap !important;
+}
+#page-play .mode-sub .range-line{
+  display:block !important;
+  flex:1 1 auto !important;
+  min-width:0 !important;
+  white-space:normal !important;
+  overflow:visible !important;
+  text-overflow:clip !important;
+  word-break:keep-all !important;
+}
+@media (max-width:700px){
+  #page-play .mode-sub{
+    font-size:clamp(10px,1.38svh,11.5px) !important;
+    line-height:1.16 !important;
+    padding:4px 8px 5px !important;
+  }
+  #page-play .answer-zone.result-feedback .input-row{
+    display:none !important;
+  }
+  #page-play .answer-zone.result-feedback .feedback{
+    display:flex !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    flex-direction:column !important;
+    align-items:center !important;
+    justify-content:center !important;
+    gap:5px !important;
+    width:100% !important;
+    min-height:clamp(70px,8.8svh,86px) !important;
+    max-height:none !important;
+    padding:10px 14px !important;
+    margin:0 !important;
+    border-radius:16px !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    line-height:1.22 !important;
+    text-align:center !important;
+  }
+  #page-play .answer-zone.result-feedback .feedback .result-word{
+    display:block !important;
+    margin:0 !important;
+    font-size:clamp(16px,2.25svh,19px) !important;
+    line-height:1.05 !important;
+    font-weight:900 !important;
+    white-space:nowrap !important;
+  }
+  #page-play .answer-zone.result-feedback .feedback .criteria{
+    display:block !important;
+    flex:0 1 auto !important;
+    width:100% !important;
+    max-width:100% !important;
+    color:#fff0bf !important;
+    font-size:clamp(13px,1.9svh,16px) !important;
+    line-height:1.22 !important;
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+    word-break:keep-all !important;
+  }
+}
+@media (max-width:380px){
+  #page-play .answer-zone.result-feedback .feedback{
+    min-height:clamp(66px,8.5svh,82px) !important;
+    padding:9px 10px !important;
+  }
+  #page-play .answer-zone.result-feedback .feedback .criteria{
+    font-size:clamp(12px,1.78svh,14px) !important;
+  }
+}
