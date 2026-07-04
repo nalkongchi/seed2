@@ -91,6 +91,7 @@ function saveJSON(key, value) {
 function markImageAsset(imgId, cardId, isBackground = false) {
   const img = $(imgId);
   if (!img) return;
+  img.setAttribute("draggable", "false");
   const card = cardId ? $(cardId) : img.closest(".home-image-btn, .home-asset-card");
   const success = () => {
     if (isBackground) {
@@ -117,6 +118,20 @@ function initHomeAssets() {
   markImageAsset("asset-btn-home-practice");
   markImageAsset("asset-btn-home-wrong");
   markImageAsset("asset-btn-home-settings");
+}
+
+function preventImageLongPress() {
+  const stopImageMenu = event => {
+    if (event.target?.closest?.("img, .home-hit-btn, .image-button")) event.preventDefault();
+  };
+  document.querySelectorAll("img").forEach(img => {
+    img.setAttribute("draggable", "false");
+    img.addEventListener("contextmenu", event => event.preventDefault());
+    img.addEventListener("dragstart", event => event.preventDefault());
+    img.addEventListener("selectstart", event => event.preventDefault());
+  });
+  document.addEventListener("contextmenu", stopImageMenu, { capture: true });
+  document.addEventListener("dragstart", stopImageMenu, { capture: true });
 }
 
 function getBgmVolume() {
@@ -490,20 +505,37 @@ function updatePlayHeader() {
 }
 
 function updateStatus() {
-  const pbarTrack = document.getElementById("pbar")?.parentElement;
+  const pbar = $("pbar");
+  const pbarTrack = pbar?.parentElement;
   if (pbarTrack) pbarTrack.classList.toggle("time-mode", state.mode === "time");
   if (state.mode === "time") {
     setText("status-1-lbl", "남은 시간");
     setText("status-1-val", formatTime(state.timeLeft));
     setText("status-2-lbl", "정답 수");
     setText("status-2-val", String(state.correct));
-    $("pbar").style.width = `${Math.max(0, Math.min(100, (state.timeLeft / 60) * 100))}%`;
+    const remainPct = Math.max(0, Math.min(100, (state.timeLeft / 60) * 100));
+    // v1.2-25: 실전모드 시간바는 오른쪽에 남은 시간이 붙고 왼쪽부터 비워지게 한다.
+    pbar.style.position = "absolute";
+    pbar.style.right = "0";
+    pbar.style.left = "auto";
+    pbar.style.top = "0";
+    pbar.style.bottom = "0";
+    pbar.style.width = `${remainPct}%`;
+    pbar.style.marginLeft = "0";
+    pbar.style.transformOrigin = "right center";
   } else {
     setText("status-1-lbl", "맞힘 수");
     setText("status-1-val", String(state.correct));
     setText("status-2-lbl", "틀림 수");
     setText("status-2-val", String(state.wrong));
-    $("pbar").style.width = state.pool.length ? `${Math.min(100, (state.correct / Math.max(10, state.correct + state.wrong + 1)) * 100)}%` : "0%";
+    pbar.style.position = "relative";
+    pbar.style.left = "0";
+    pbar.style.right = "auto";
+    pbar.style.top = "auto";
+    pbar.style.bottom = "auto";
+    pbar.style.marginLeft = "0";
+    pbar.style.transformOrigin = "left center";
+    pbar.style.width = state.pool.length ? `${Math.min(100, (state.correct / Math.max(10, state.correct + state.wrong + 1)) * 100)}%` : "0%";
   }
 }
 
@@ -542,11 +574,44 @@ function startTimeAttackTimer() {
   }, 1000);
 }
 
+function getStageWeight(stage) {
+  if (["보급종", "보급종포", "채종포 1세대"].includes(stage)) return 3;
+  if (["원종", "원종포"].includes(stage)) return 1.5;
+  if (["원원종", "원원종포"].includes(stage)) return 1;
+  return 1;
+}
+
+function getCropWeight(crop) {
+  return ({
+    "벼": 3,
+    "콩": 3,
+    "보리": 2.5,
+    "밀": 2.5,
+    "팥": 1,
+    "트리티케일(사료용)": 1
+  })[crop] || 1;
+}
+
+function getQuestionWeight(q) {
+  return Math.max(0.1, getStageWeight(q.stage) * getCropWeight(q.crop));
+}
+
+function weightedPick(source) {
+  const total = source.reduce((sum, q) => sum + getQuestionWeight(q), 0);
+  if (!Number.isFinite(total) || total <= 0) return source[Math.floor(Math.random() * source.length)];
+  let cursor = Math.random() * total;
+  for (const q of source) {
+    cursor -= getQuestionWeight(q);
+    if (cursor <= 0) return q;
+  }
+  return source[source.length - 1];
+}
+
 function pickQuestion() {
   if (!state.pool.length) return null;
   const candidates = state.pool.filter(q => !state.curQuestion || q.id !== state.curQuestion.id);
   const source = candidates.length ? candidates : state.pool;
-  return source[Math.floor(Math.random() * source.length)];
+  return weightedPick(source);
 }
 
 function setMobileControlsActive(active, mode = "submit") {
@@ -1033,6 +1098,7 @@ function init() {
   loadWrongNotes();
   loadBestRecord();
   initHomeAssets();
+  preventImageLongPress();
   renderPracticeOptions();
   validatePracticeSelection();
   bindEvents();
