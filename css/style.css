@@ -1558,3 +1558,60 @@ body #page-play .answer-zone .mobile-keypad .keypad-btn.control,
 @media (max-width:700px){
   .home-bg-layer::before{ display:none !important; }
 }
+
+/* v1.2-31 desktop home + keyboard support
+   PC 홈 화면만 정확한 원본 비율(941:1672)의 중앙 스테이지로 표시한다.
+   중앙 스테이지 바깥의 모니터 여백은 같은 배경의 흐린 cover 레이어로 채운다.
+   모바일(≤700px)의 기존 홈 레이아웃은 변경하지 않는다. */
+@media (min-width:701px){
+  #page-home.image-home-page{
+    position:fixed !important;
+    inset:0 !important;
+    width:100vw !important;
+    height:100vh !important;
+    height:100dvh !important;
+    min-height:0 !important;
+    padding:0 !important;
+    justify-content:center !important;
+    align-items:center !important;
+    overflow:hidden !important;
+    background:#182b48 !important;
+  }
+  #page-home.image-home-page::after{
+    content:"";
+    position:absolute;
+    inset:-32px;
+    background-image:url('../images/home/home_bg.png');
+    background-image:image-set(url('../images/home/home_bg.webp') 1x, url('../images/home/home_bg.png') 1x);
+    background-position:center center;
+    background-size:cover;
+    background-repeat:no-repeat;
+    filter:blur(30px) brightness(.56) saturate(.92);
+    transform:scale(1.05);
+    opacity:.96;
+    z-index:0;
+    pointer-events:none;
+  }
+  #page-home .home-stage{
+    width:min(calc(100vw - 28px), calc((100vh - 28px) * 941 / 1672)) !important;
+    width:min(calc(100vw - 28px), calc((100dvh - 28px) * 941 / 1672)) !important;
+    height:auto !important;
+    aspect-ratio:941 / 1672 !important;
+    max-width:none !important;
+    max-height:calc(100dvh - 28px) !important;
+    margin:auto !important;
+    align-self:center !important;
+    flex:0 0 auto !important;
+    z-index:2 !important;
+  }
+  #page-home .home-bg-layer::before{
+    display:none !important;
+  }
+  #page-home .home-bg-image{
+    width:100% !important;
+    height:100% !important;
+    object-fit:contain !important;
+    object-position:center top !important;
+  }
+}
+

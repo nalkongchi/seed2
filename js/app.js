@@ -633,6 +633,7 @@ function setMobileControlsActive(active, mode = "submit") {
   } else {
     zone.classList.remove("mode-stop", "mode-submit", "is-disabled");
     $("btn-submit").disabled = !active;
+    $("ans").readOnly = false;
   }
 }
 
@@ -1074,11 +1075,25 @@ function bindEvents() {
   $("btn-bgm-up").addEventListener("click", () => { maybeBeep("button"); adjustBgmLevel(1); });
 
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter") return;
+    if (e.key !== "Enter" || e.repeat || e.isComposing) return;
+    if (!$("page-play")?.classList.contains("active") || state.runEnded) return;
+    if (document.querySelector(".modal-layer.active")) return;
+
+    // PC 키보드 흐름: 룰렛 회전 중 Enter = STOP, 문제 확정 후 Enter = 제출
+    if (state.spinning) {
+      const stop = $("btn-stop");
+      if (!stop || stop.classList.contains("hidden") || stop.disabled) return;
+      e.preventDefault();
+      maybeBeep("button");
+      stopSpin();
+      return;
+    }
+
     const submit = $("btn-submit");
     if (!submit || submit.classList.contains("hidden") || submit.disabled) return;
     if ($("answer-zone")?.classList.contains("is-disabled")) return;
     if (state.scored) return;
+    e.preventDefault();
     evaluateAnswer();
   });
 
