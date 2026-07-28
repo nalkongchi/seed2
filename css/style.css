@@ -1615,3 +1615,28 @@ body #page-play .answer-zone .mobile-keypad .keypad-btn.control,
   }
 }
 
+/* v1.2-33 short-screen keypad-only adjustment
+   기준본: 사용자가 다시 제공한 v1.2-31 → v1.2-32 규격 데이터 수정 후 적용
+   상단 HUD, 룰렛, 질문, 입력칸, STOP/제출 버튼은 변경하지 않는다.
+   세로 가용 높이가 매우 짧을 때 숫자 키패드의 높이와 내부 간격만 줄인다. */
+@media (max-width:700px) and (max-height:700px){
+  #page-play .keypad-btn{
+    height:30px !important;
+    font-size:18px !important;
+    border-radius:9px !important;
+  }
+  #page-play .mobile-keypad{
+    gap:4px !important;
+  }
+}
+@media (max-width:700px) and (max-height:620px){
+  #page-play .keypad-btn{
+    height:28px !important;
+    font-size:17px !important;
+    border-radius:8px !important;
+  }
+  #page-play .mobile-keypad{
+    gap:3px !important;
+  }
+}
+

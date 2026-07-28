@@ -1,6 +1,6 @@
 const QUESTION_SET = buildQuestionSet(QUESTION_RULES);
 const EXAM_TYPES = ["포장검사", "종자검사"];
-const CROPS = ["벼", "보리", "밀", "콩", "팥", "트리티케일(사료용)"];
+const CROPS = ["벼", "보리", "밀", "콩", "팥", "라이밀(트리티케일)"];
 const STAGE_GROUPS = ["원원종", "원종", "보급종"];
 const STAGE_GROUP_MAP = {
   "원원종": ["원원종", "원원종포"],
@@ -261,7 +261,36 @@ function saveSettings() {
 }
 
 function loadWrongNotes() {
-  state.wrongNotes = loadJSON(STORAGE_KEYS.wrongs, []);
+  const loaded = loadJSON(STORAGE_KEYS.wrongs, []);
+  let migrated = false;
+  const seen = new Set();
+
+  state.wrongNotes = loaded.flatMap(q => {
+    if (!q) return [];
+    const crop = q.crop === "트리티케일(사료용)" ? "라이밀(트리티케일)" : q.crop;
+    const item = q.item === "피해출현율" ? "메벼출현율" : q.item;
+    const current = QUESTION_SET.find(candidate =>
+      candidate.examType === q.examType &&
+      candidate.stage === q.stage &&
+      candidate.crop === crop &&
+      candidate.item === item
+    );
+    const normalized = current || { ...q, crop, item };
+    if (!isAllowedQuestion(normalized) || seen.has(normalized.id)) {
+      migrated = true;
+      return [];
+    }
+    seen.add(normalized.id);
+    if (
+      normalized.id !== q.id ||
+      normalized.crop !== q.crop ||
+      normalized.item !== q.item ||
+      normalized.answer !== q.answer
+    ) migrated = true;
+    return [normalized];
+  });
+
+  if (migrated) saveWrongNotes();
 }
 function saveWrongNotes() {
   saveJSON(STORAGE_KEYS.wrongs, state.wrongNotes);
@@ -298,7 +327,7 @@ function renderPracticeOptions() {
   CROPS.forEach(crop => {
     const label = document.createElement("label");
     label.className = "check-item";
-    const cropText = crop === "트리티케일(사료용)" ? "트리티케일<br>(사료용)" : crop;
+    const cropText = crop === "라이밀(트리티케일)" ? "라이밀<br>(트리티케일)" : crop;
     label.innerHTML = `<input type="checkbox" class="crop-check" value="${crop}" checked><span>${cropText}</span>`;
     cropGrid.appendChild(label);
   });
@@ -588,7 +617,7 @@ function getCropWeight(crop) {
     "보리": 2.5,
     "밀": 2.5,
     "팥": 1,
-    "트리티케일(사료용)": 1
+    "라이밀(트리티케일)": 1
   })[crop] || 1;
 }
 
