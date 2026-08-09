@@ -34,11 +34,20 @@ globalThis.__storageTest = {
   handleVisibilityChange,
   handlePageHide,
   isBetterCompletionRecord,
+  normalizeTimeCheckpoint,
+  isValidTimeCheckpoint,
   weightedPick,
   pickQuestion,
   stopSpin,
   handleQuitPlay,
   saveSettings,
+  openModal,
+  closeModal,
+  beginSettingsEdit,
+  discardSettingsDraft,
+  adjustBgmLevel,
+  syncSettingsDraftFromUI,
+  getBgmVolume,
   pushWrongNote,
   clearWrongNotes,
   startWrongPracticeMode,
@@ -48,7 +57,8 @@ globalThis.__storageTest = {
   getAnswerGuideText,
   getAnswerPlaceholder,
   formatFeedback,
-  syncPlayControlsForViewport
+  syncPlayControlsForViewport,
+  resetRunCommon
 };`;
 
 class FakeClassList {
@@ -83,6 +93,11 @@ class FakeElement {
     this.paused = true;
     this.currentTime = 0;
     this.volume = 1;
+    this.hidden = false;
+    this.isConnected = true;
+    this.attributes = new Map();
+    this.focusableChildren = [];
+    this.onFocus = null;
     this.listeners = new Map();
   }
   addEventListener(type, listener) {
@@ -90,16 +105,18 @@ class FakeElement {
     this.listeners.get(type).push(listener);
   }
   click() {
-    (this.listeners.get("click") || []).forEach(listener => listener({ target: this }));
+    (this.listeners.get("click") || []).forEach(listener => listener({ target: this, currentTarget: this }));
   }
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
   appendChild(child) { this.children.push(child); return child; }
   closest() { return null; }
   querySelector() { return null; }
-  querySelectorAll() { return []; }
-  remove() {}
+  querySelectorAll() { return this.focusableChildren; }
+  contains(target) { return this === target || this.focusableChildren.includes(target); }
+  remove() { this.isConnected = false; }
   blur() {}
-  focus() {}
+  focus() { if (this.onFocus) this.onFocus(this); }
   load() {}
   pause() { this.paused = true; }
   play() { this.paused = false; return Promise.resolve(); }
@@ -136,15 +153,31 @@ function createRuntime(initialStorage = {}, options = {}) {
   let nextTimerId = 1;
   let nowMs = options.nowMs || 0;
   let viewportWidth = options.viewportWidth || 1000;
+  let activeElement = null;
 
   const getElement = id => {
-    if (!elements.has(id)) elements.set(id, new FakeElement(id));
+    if (!elements.has(id)) {
+      const element = new FakeElement(id);
+      element.onFocus = focused => { activeElement = focused; };
+      elements.set(id, element);
+    }
     return elements.get(id);
   };
   ["page-home", "page-play", "page-result"].forEach(getElement);
 
+  const modalFocusIds = {
+    "page-time-intro": ["btn-time-intro-close", "btn-time-intro-start", "btn-time-resume", "btn-time-new"],
+    "page-practice-setup": ["btn-practice-close", "btn-practice-start"],
+    "page-wrong": ["btn-wrong-close", "btn-wrong-practice", "btn-wrong-clear"],
+    "page-settings": ["btn-settings-close", "btn-bgm-down", "btn-bgm-up", "toggle-sfx", "toggle-vibrate", "btn-settings-save"]
+  };
+  Object.entries(modalFocusIds).forEach(([modalId, ids]) => {
+    getElement(modalId).focusableChildren = ids.map(getElement);
+  });
+
   const document = {
     hidden: false,
+    get activeElement() { return activeElement; },
     getElementById: getElement,
     createElement: tag => new FakeElement(tag),
     createTextNode: text => ({ nodeType: 3, textContent: String(text), children: [] }),
@@ -156,14 +189,24 @@ function createRuntime(initialStorage = {}, options = {}) {
       if (selector === ".base-page.active") {
         return [...elements.values()].find(el => el.classList.contains("active")) || null;
       }
+      if (selector === ".modal-layer.active") {
+        return Object.keys(modalFocusIds).map(getElement).find(el => el.classList.contains("active")) || null;
+      }
       return null;
     },
     querySelectorAll(selector) {
       if (selector === ".base-page") {
         return [getElement("page-home"), getElement("page-play"), getElement("page-result")];
       }
+      if (selector === ".modal-layer") {
+        return Object.keys(modalFocusIds).map(getElement);
+      }
+      if (selector === ".modal-layer.active") {
+        return Object.keys(modalFocusIds).map(getElement).filter(el => el.classList.contains("active"));
+      }
       return [];
-    }
+    },
+    contains(element) { return !!element && element.isConnected !== false; }
   };
 
   const localStorage = options.localStorage || createStorage(initialStorage, options);
@@ -222,6 +265,22 @@ function createRuntime(initialStorage = {}, options = {}) {
     },
     triggerPageHide() {
       (windowListeners.get("pagehide") || []).forEach(listener => listener());
+    },
+    activeElement: () => activeElement,
+    triggerKeydown(key, overrides = {}) {
+      const event = {
+        key,
+        repeat: false,
+        isComposing: false,
+        shiftKey: false,
+        defaultPrevented: false,
+        propagationStopped: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopPropagation() { this.propagationStopped = true; },
+        ...overrides
+      };
+      (documentListeners.get("keydown") || []).forEach(listener => listener(event));
+      return event;
     },
     resizeTo(width) {
       viewportWidth = width;
@@ -859,6 +918,8 @@ function makeCheckpoint(runtime, overrides = {}) {
     correct: 3,
     tries: 5,
     wrong: 2,
+    combo: 0,
+    maxCombo: 0,
     elapsedMs: 12345,
     phase: "spin",
     questionId: question.id,
@@ -1548,4 +1609,549 @@ test("7단계 B: 홈은 941:1672 contain stage와 겹치지 않는 동일 좌표
       assert.equal(overlapWidth * overlapHeight, 0, `${a.id}/${b.id}`);
     }
   }
+});
+
+test("8단계 A/B/C/D/E: 정답 combo 증가·3연속 feedback·오답 reset·maxCombo 보존", () => {
+  const runtime = runtimeForScoring();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET[0];
+  runtime.api.state.mode = "practice";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+
+  const answer = value => {
+    runtime.api.state.scored = false;
+    runtime.element("ans").value = value;
+    runtime.api.evaluateAnswer();
+  };
+
+  answer(question.answer);
+  assert.equal(runtime.api.state.combo, 1);
+  assert.equal(runtime.api.state.maxCombo, 1);
+  assert.doesNotMatch(runtime.element("feedback").innerHTML, /연속/);
+  answer(question.answer);
+  assert.equal(runtime.api.state.combo, 2);
+  assert.equal(runtime.api.state.maxCombo, 2);
+  assert.doesNotMatch(runtime.element("feedback").innerHTML, /연속/);
+  answer(question.answer);
+  assert.equal(runtime.api.state.combo, 3);
+  assert.equal(runtime.api.state.maxCombo, 3);
+  assert.match(runtime.element("feedback").innerHTML, /🔥 3연속!/);
+
+  answer("999999");
+  assert.equal(runtime.api.state.combo, 0);
+  assert.equal(runtime.api.state.maxCombo, 3);
+  assert.doesNotMatch(runtime.element("feedback").innerHTML, /연속/);
+  answer(question.answer);
+  assert.equal(runtime.api.state.combo, 1);
+  assert.equal(runtime.api.state.maxCombo, 3);
+  assert.doesNotMatch(runtime.element("feedback").innerHTML, /연속/);
+});
+
+test("8단계 E/H: 15번째 정답도 combo/maxCombo를 갱신하고 결과에 최대 연속을 표시한다", () => {
+  const runtime = runtimeForScoring();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET[0];
+  runtime.api.state.mode = "time";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.api.state.correct = 14;
+  runtime.api.state.tries = 14;
+  runtime.api.state.wrong = 0;
+  runtime.api.state.combo = 4;
+  runtime.api.state.maxCombo = 4;
+  runtime.api.startStopwatch();
+  runtime.element("ans").value = question.answer;
+  runtime.api.evaluateAnswer();
+
+  assert.equal(runtime.api.state.correct, 15);
+  assert.equal(runtime.api.state.combo, 5);
+  assert.equal(runtime.api.state.maxCombo, 5);
+  assert.equal(runtime.element("r-max-combo").textContent, "5");
+  assert.equal(runtime.api.state.runEnded, true);
+});
+
+test("8단계 I/J/K: practice·wrong-practice도 동일한 combo 흐름을 사용하고 새 run은 0부터 시작한다", () => {
+  const seed = runtimeForScoring();
+  const question = seed.api.QUESTION_SET[0];
+  for (const mode of ["practice", "wrong-practice"]) {
+    const runtime = runtimeForScoring({ [seed.api.STORAGE_KEYS.wrongs]: json([question]) });
+    runtime.api.init();
+    runtime.api.state.mode = mode;
+    runtime.api.state.pool = [question];
+    runtime.api.state.curQuestion = question;
+    runtime.element("ans").value = question.answer;
+    runtime.api.evaluateAnswer();
+    assert.equal(runtime.api.state.combo, 1, mode);
+    runtime.api.state.scored = false;
+    runtime.element("ans").value = question.answer;
+    runtime.api.evaluateAnswer();
+    runtime.api.state.scored = false;
+    runtime.element("ans").value = question.answer;
+    runtime.api.evaluateAnswer();
+    assert.equal(runtime.api.state.combo, 3, mode);
+    assert.match(runtime.element("feedback").innerHTML, /🔥 3연속!/);
+    runtime.api.state.combo = 7;
+    runtime.api.state.maxCombo = 8;
+    runtime.api.resetRunCommon();
+    assert.equal(runtime.api.state.combo, 0, mode);
+    assert.equal(runtime.api.state.maxCombo, 0, mode);
+  }
+});
+
+test("8단계 I/J: 실전·연습·오답연습 시작과 다시 도전은 combo/maxCombo를 0으로 초기화한다", () => {
+  const seed = createRuntime();
+  const question = seed.api.QUESTION_SET[0];
+
+  const time = createRuntime();
+  time.api.init();
+  time.api.state.combo = 6;
+  time.api.state.maxCombo = 8;
+  time.api.startTimeMode();
+  assert.equal(time.api.state.combo, 0);
+  assert.equal(time.api.state.maxCombo, 0);
+
+  const practice = createRuntime();
+  practice.api.init();
+  practice.api.state.combo = 4;
+  practice.api.state.maxCombo = 4;
+  practice.api.resetRunCommon();
+  assert.equal(practice.api.state.combo, 0);
+  assert.equal(practice.api.state.maxCombo, 0);
+
+  const wrong = createRuntime({ [seed.api.STORAGE_KEYS.wrongs]: json([question]) });
+  wrong.api.init();
+  wrong.api.state.combo = 4;
+  wrong.api.state.maxCombo = 5;
+  wrong.api.startWrongPracticeMode();
+  assert.equal(wrong.api.state.combo, 0);
+  assert.equal(wrong.api.state.maxCombo, 0);
+});
+
+test("8단계 M/N/O/P: v2 checkpoint가 phase별 combo/maxCombo를 복원하고 feedback 후 중복 채점하지 않는다", () => {
+  const seed = createRuntime();
+  const question = seed.api.QUESTION_SET[0];
+  const checkpoint = makeCheckpoint(seed, {
+    correct: 5,
+    tries: 7,
+    wrong: 2,
+    combo: 2,
+    maxCombo: 3,
+    phase: "spin",
+    questionId: question.id
+  });
+  const runtime = createRuntime({ [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint) });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  assert.equal(runtime.api.state.combo, 2);
+  assert.equal(runtime.api.state.maxCombo, 3);
+  assert.equal(runtime.api.state.curQuestion.id, question.id);
+
+  const answerCheckpoint = { ...checkpoint, phase: "answer" };
+  const answerRuntime = createRuntime({ [seed.api.STORAGE_KEYS.inProgress]: json(answerCheckpoint) });
+  answerRuntime.api.init();
+  answerRuntime.api.resumeTimeMode();
+  answerRuntime.element("ans").value = question.answer;
+  answerRuntime.api.evaluateAnswer();
+  assert.equal(answerRuntime.api.state.combo, 3);
+  assert.equal(answerRuntime.api.state.maxCombo, 3);
+  assert.match(answerRuntime.element("feedback").innerHTML, /🔥 3연속!/);
+
+  const feedbackCheckpoint = { ...checkpoint, combo: 4, maxCombo: 4, phase: "feedback" };
+  const feedbackRuntime = createRuntime({ [seed.api.STORAGE_KEYS.inProgress]: json(feedbackCheckpoint) });
+  feedbackRuntime.api.init();
+  feedbackRuntime.api.resumeTimeMode();
+  assert.equal(feedbackRuntime.api.state.combo, 4);
+  assert.equal(feedbackRuntime.api.state.maxCombo, 4);
+  assert.equal(feedbackRuntime.api.state.correct, 5);
+  assert.equal(feedbackRuntime.api.state.tries, 7);
+
+  const wrongFeedback = { ...feedbackCheckpoint, combo: 0, maxCombo: 4 };
+  const wrongRuntime = createRuntime({ [seed.api.STORAGE_KEYS.inProgress]: json(wrongFeedback) });
+  wrongRuntime.api.init();
+  wrongRuntime.api.resumeTimeMode();
+  assert.equal(wrongRuntime.api.state.combo, 0);
+  assert.equal(wrongRuntime.api.state.maxCombo, 4);
+});
+
+test("8단계 Q: legacy v1 checkpoint는 combo 0으로 resume하고 다음 저장부터 v2가 된다", () => {
+  const seed = createRuntime();
+  const question = seed.api.QUESTION_SET[0];
+  const legacy = {
+    version: 1,
+    correct: 5,
+    tries: 7,
+    wrong: 2,
+    elapsedMs: 12345,
+    phase: "spin",
+    questionId: question.id,
+    recentWrongIds: []
+  };
+  const runtime = createRuntime({ [seed.api.STORAGE_KEYS.inProgress]: json(legacy) });
+  runtime.api.init();
+  assert.equal(runtime.api.state.timeCheckpoint.version, 2);
+  assert.equal(runtime.api.state.timeCheckpoint.combo, 0);
+  assert.equal(runtime.api.state.timeCheckpoint.maxCombo, 0);
+  runtime.api.resumeTimeMode();
+  const saved = JSON.parse(runtime.raw(seed.api.STORAGE_KEYS.inProgress));
+  assert.equal(saved.version, 2);
+  assert.equal(saved.combo, 0);
+  assert.equal(saved.maxCombo, 0);
+});
+
+test("8단계 R/S/T: malformed v2 combo는 crash 없이 격리하고 별도 all-time combo key를 만들지 않는다", () => {
+  const seed = createRuntime();
+  const question = seed.api.QUESTION_SET[0];
+  for (const overrides of [
+    { combo: -1, maxCombo: 0 },
+    { combo: 4, maxCombo: 3 },
+    { combo: 3, maxCombo: 3, correct: 2 },
+    { combo: 2, maxCombo: 8, correct: 5 }
+  ]) {
+    const checkpoint = makeCheckpoint(seed, overrides);
+    const runtime = createRuntime({ [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint) });
+    assert.doesNotThrow(() => runtime.api.init());
+    assert.equal(runtime.api.state.timeCheckpoint, null);
+  }
+  assert.deepEqual(Object.keys(seed.api.STORAGE_KEYS).sort(), ["best", "completionBest", "inProgress", "settings", "wrongs"]);
+  assert.equal(seed.api.TIME_CHECKPOINT_VERSION, 2);
+  assert.equal(seed.api.normalizeTimeCheckpoint({ version: 1 }), null);
+});
+test("Stage 9: settings BGM/SFX/vibrate edits stay in a draft until save", () => {
+  const seed = createRuntime();
+  const stored = json({ bgmLevel: 3, sfx: true, vibrate: true });
+  const runtime = createRuntime({ [seed.api.STORAGE_KEYS.settings]: stored });
+  runtime.api.init();
+  runtime.element("btn-home-settings").click();
+  assert.deepEqual(plain(runtime.api.state.settingsDraft), { bgmLevel: 3, sfx: true, vibrate: true });
+  runtime.element("btn-bgm-up").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("toggle-sfx").checked = false;
+  runtime.element("toggle-vibrate").checked = false;
+  runtime.api.syncSettingsDraftFromUI();
+  assert.deepEqual(plain(runtime.api.state.settings), { bgmLevel: 3, sfx: true, vibrate: true });
+  assert.deepEqual(plain(runtime.api.state.settingsDraft), { bgmLevel: 5, sfx: false, vibrate: false });
+  assert.equal(runtime.raw(seed.api.STORAGE_KEYS.settings), stored);
+});
+
+test("Stage 9: settings close and backdrop discard draft and restore committed BGM", () => {
+  const seed = createRuntime();
+  const runtime = createRuntime({ [seed.api.STORAGE_KEYS.settings]: json({ bgmLevel: 3, sfx: true, vibrate: true }) });
+  runtime.api.init();
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  assert.equal(runtime.element("bgm-home").volume, 0.55);
+  runtime.element("btn-settings-close").click();
+  assert.equal(runtime.api.state.settingsDraft, null);
+  assert.equal(runtime.api.state.settings.bgmLevel, 3);
+  assert.equal(runtime.element("bgm-volume-level").textContent, "3");
+  assert.equal(runtime.element("bgm-home").volume, 0.42);
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("page-settings").click();
+  assert.equal(runtime.api.state.settingsDraft, null);
+  assert.equal(runtime.api.state.settings.bgmLevel, 3);
+  assert.equal(runtime.element("page-settings").classList.contains("active"), false);
+  assert.equal(runtime.element("bgm-home").volume, 0.42);
+});
+
+test("Stage 9: settings save commits normalized draft and survives reload", () => {
+  const seed = createRuntime();
+  const storage = createStorage({ [seed.api.STORAGE_KEYS.settings]: json({ bgmLevel: 3, sfx: true, vibrate: true }) });
+  const runtime = createRuntime({}, { localStorage: storage });
+  runtime.api.init();
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("toggle-sfx").checked = false;
+  runtime.element("toggle-vibrate").checked = false;
+  runtime.api.syncSettingsDraftFromUI();
+  runtime.element("btn-settings-save").click();
+  assert.deepEqual(plain(runtime.api.state.settings), { bgmLevel: 5, sfx: false, vibrate: false });
+  assert.equal(runtime.api.state.settingsDraft, null);
+  assert.deepEqual(JSON.parse(storage.raw(seed.api.STORAGE_KEYS.settings)), { bgmLevel: 5, sfx: false, vibrate: false });
+  const reloaded = createRuntime({}, { localStorage: storage });
+  reloaded.api.init();
+  assert.deepEqual(plain(reloaded.api.state.settings), { bgmLevel: 5, sfx: false, vibrate: false });
+});
+
+test("Stage 9: legacy bgm false still migrates to committed level zero without a draft", () => {
+  const seed = createRuntime();
+  const raw = json({ bgm: false, sfx: true, vibrate: true });
+  const runtime = createRuntime({ [seed.api.STORAGE_KEYS.settings]: raw });
+  runtime.api.init();
+  assert.equal(runtime.api.state.settings.bgmLevel, 0);
+  assert.equal(runtime.api.state.settingsDraft, null);
+  runtime.element("btn-home-settings").click();
+  assert.equal(runtime.api.state.settingsDraft.bgmLevel, 0);
+  runtime.element("btn-bgm-up").click();
+  runtime.element("btn-settings-close").click();
+  assert.equal(runtime.api.state.settings.bgmLevel, 0);
+  assert.equal(runtime.raw(seed.api.STORAGE_KEYS.settings), json({ bgmLevel: 0, sfx: true, vibrate: true }));
+});
+
+test("10A A: all real modals expose dialog semantics linked to existing titles", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  for (const [modalId, titleId] of [
+    ["page-time-intro", "time-intro-title"],
+    ["page-practice-setup", "practice-setup-title"],
+    ["page-wrong", "wrong-title"],
+    ["page-settings", "settings-title"]
+  ]) {
+    assert.match(html, new RegExp(`<section[^>]*id="${modalId}"[^>]*role="dialog"[^>]*aria-modal="true"[^>]*aria-labelledby="${titleId}"`));
+    assert.match(html, new RegExp(`<h2[^>]*id="${titleId}"[^>]*>`));
+  }
+});
+
+test("10A B/C/D/E/M: settings open moves focus inside and X/backdrop/Escape restore its opener", () => {
+  for (const closeMethod of ["x", "backdrop", "escape"]) {
+    const runtime = createRuntime();
+    runtime.api.init();
+    const opener = runtime.element("btn-home-settings");
+    opener.focus();
+    opener.click();
+    assert.equal(runtime.activeElement(), runtime.element("btn-settings-close"), closeMethod);
+    if (closeMethod === "x") runtime.element("btn-settings-close").click();
+    else if (closeMethod === "backdrop") runtime.element("page-settings").click();
+    else runtime.triggerKeydown("Escape");
+    assert.equal(runtime.element("page-settings").classList.contains("active"), false, closeMethod);
+    assert.equal(runtime.activeElement(), opener, closeMethod);
+  }
+});
+
+test("10A F/G/H: Tab and Shift+Tab wrap within the active modal", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.element("btn-home-settings").focus();
+  runtime.element("btn-home-settings").click();
+  const first = runtime.element("btn-settings-close");
+  const last = runtime.element("btn-settings-save");
+  last.focus();
+  const tab = runtime.triggerKeydown("Tab");
+  assert.equal(tab.defaultPrevented, true);
+  assert.equal(runtime.activeElement(), first);
+  first.focus();
+  const shiftTab = runtime.triggerKeydown("Tab", { shiftKey: true });
+  assert.equal(shiftTab.defaultPrevented, true);
+  assert.equal(runtime.activeElement(), last);
+  runtime.element("btn-home-time").focus();
+  runtime.triggerKeydown("Tab");
+  assert.equal(runtime.activeElement(), first);
+});
+
+test("10A I: settings Escape discards draft and restores committed state, storage, and BGM", () => {
+  const seed = createRuntime();
+  const committed = json({ bgmLevel: 3, sfx: true, vibrate: true });
+  const runtime = createRuntime({ [seed.api.STORAGE_KEYS.settings]: committed });
+  runtime.api.init();
+  runtime.element("btn-home-settings").focus();
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("toggle-sfx").checked = false;
+  runtime.element("toggle-vibrate").checked = false;
+  runtime.api.syncSettingsDraftFromUI();
+  runtime.triggerKeydown("Escape");
+  assert.equal(runtime.api.state.settingsDraft, null);
+  assert.deepEqual(plain(runtime.api.state.settings), { bgmLevel: 3, sfx: true, vibrate: true });
+  assert.equal(runtime.raw(seed.api.STORAGE_KEYS.settings), committed);
+  assert.equal(runtime.element("bgm-home").volume, 0.42);
+});
+
+test("10A J: active modal blocks background Enter STOP and submit", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET[0];
+  runtime.element("page-home").classList.remove("active");
+  runtime.element("page-play").classList.add("active");
+  runtime.api.state.mode = "practice";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.api.state.spinning = true;
+  runtime.api.state.runEnded = false;
+  runtime.api.openModal("wrong");
+  runtime.triggerKeydown("Enter");
+  assert.equal(runtime.api.state.spinning, true);
+  runtime.api.state.spinning = false;
+  runtime.api.state.scored = false;
+  runtime.element("ans").value = question.answer;
+  runtime.triggerKeydown("Enter");
+  assert.equal(runtime.api.state.tries, 0);
+});
+
+test("10A K/L: Escape closes only one modal and normal opening keeps at most one active", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.element("btn-home-settings").focus();
+  runtime.element("btn-home-settings").click();
+  runtime.api.openModal("wrong");
+  const activeBefore = ["page-time-intro", "page-practice-setup", "page-wrong", "page-settings"]
+    .filter(id => runtime.element(id).classList.contains("active"));
+  assert.deepEqual(activeBefore, ["page-wrong"]);
+  runtime.triggerKeydown("Escape");
+  const activeAfter = ["page-time-intro", "page-practice-setup", "page-wrong", "page-settings"]
+    .filter(id => runtime.element(id).classList.contains("active"));
+  assert.deepEqual(activeAfter, []);
+  assert.equal(runtime.element("page-home").classList.contains("active"), true);
+});
+
+test("10A N: unavailable opener is skipped without throwing", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  const opener = runtime.element("btn-home-wrong");
+  opener.focus();
+  opener.click();
+  opener.disabled = true;
+  assert.doesNotThrow(() => runtime.element("btn-wrong-close").click());
+  assert.equal(runtime.element("page-wrong").classList.contains("active"), false);
+  opener.disabled = false;
+  opener.focus();
+  opener.click();
+  opener.remove();
+  assert.doesNotThrow(() => runtime.triggerKeydown("Escape"));
+});
+
+test("10A P: gameplay Enter still performs STOP and submit when no modal is active", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET[0];
+  runtime.element("page-home").classList.remove("active");
+  runtime.element("page-play").classList.add("active");
+  runtime.api.state.mode = "practice";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.api.state.spinning = true;
+  runtime.api.state.runEnded = false;
+  runtime.triggerKeydown("Enter");
+  assert.equal(runtime.api.state.spinning, false);
+  runtime.api.state.scored = false;
+  runtime.element("ans").value = question.answer;
+  runtime.triggerKeydown("Enter");
+  assert.equal(runtime.api.state.tries, 1);
+  assert.equal(runtime.api.state.correct, 1);
+});
+
+test("10B A/B/C/D/K: answer, question, and feedback expose the required live and name semantics", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  assert.match(html, /id="ans"[^>]*aria-label="정답 입력"[^>]*aria-invalid="false"/);
+  assert.match(html, /id="q-text"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  assert.match(html, /id="feedback"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  assert.doesNotMatch(html, /id="status-1-val"[^>]*aria-live/);
+  assert.doesNotMatch(html, /id="status-2-val"[^>]*aria-live/);
+});
+
+test("10B E/F/G/H/J: aria-invalid follows invalid, wrong, correct, numeric-equivalent, and next-question states", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET.find(q => q.answer === "0.10") || runtime.api.QUESTION_SET[0];
+  runtime.api.state.mode = "practice";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+
+  runtime.element("ans").value = "bad";
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.element("ans").getAttribute("aria-invalid"), "true");
+
+  runtime.api.state.scored = false;
+  runtime.element("ans").value = "999999";
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.element("ans").getAttribute("aria-invalid"), "true");
+
+  runtime.api.state.scored = false;
+  runtime.element("ans").value = question.answer;
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.element("ans").getAttribute("aria-invalid"), "false");
+
+  if (question.answer === "0.10") {
+    runtime.api.state.scored = false;
+    runtime.element("ans").value = "0.1";
+    runtime.api.evaluateAnswer();
+    assert.equal(runtime.element("ans").getAttribute("aria-invalid"), "false");
+  }
+  runtime.runTimeout(1100);
+  assert.equal(runtime.element("ans").getAttribute("aria-invalid"), "false");
+});
+
+test("10B I: combo feedback remains visible and included in the live region", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET[0];
+  runtime.api.state.mode = "practice";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  for (let i = 0; i < 3; i += 1) {
+    runtime.api.state.scored = false;
+    runtime.element("ans").value = question.answer;
+    runtime.api.evaluateAnswer();
+  }
+  assert.match(runtime.element("feedback").innerHTML, /3연속/);
+  assert.equal(runtime.element("feedback").getAttribute("role"), null);
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  assert.match(html, /id="feedback"[^>]*role="status"/);
+});
+
+test("10B L/M/N: settings switches have names and a keyboard-visible focus indicator", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  assert.match(html, /id="toggle-sfx"[^>]*aria-label="효과음"/);
+  assert.match(html, /id="toggle-vibrate"[^>]*aria-label="진동"/);
+  assert.match(css, /\.switch input:focus-visible \+ \.slider\{/);
+  assert.match(css, /outline-offset:3px/);
+});
+
+test("10B O/P/Q/R/S/T: accessibility updates preserve settings, modal, gameplay, and checkpoint contracts", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET[0];
+  runtime.api.state.mode = "practice";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.element("btn-home-settings").focus();
+  runtime.element("btn-home-settings").click();
+  runtime.element("toggle-sfx").checked = false;
+  runtime.api.syncSettingsDraftFromUI();
+  runtime.triggerKeydown("Escape");
+  assert.equal(runtime.api.state.settings.sfx, true);
+  assert.equal(runtime.api.state.settingsDraft, null);
+
+  runtime.api.state.scored = false;
+  runtime.element("ans").value = question.answer;
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.api.state.correct, 1);
+  assert.equal(runtime.api.state.combo, 1);
+  assert.equal(runtime.api.state.timeCheckpoint, null);
+});
+
+test("10C A: viewport enables safe-area coverage without disabling zoom", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  assert.match(html, /content="width=device-width, initial-scale=1\.0, viewport-fit=cover"/);
+  assert.doesNotMatch(html, /user-scalable=no/);
+});
+
+test("10C B/C: play, result, and modal shells use all four safe-area insets without changing Stage 7 home coordinates", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const marker = css.lastIndexOf("/* Stage 10C safe-area and touch-target stabilization */");
+  const stage10c = css.slice(marker);
+  for (const side of ["top", "right", "bottom", "left"]) {
+    assert.match(stage10c, new RegExp(`env\\(safe-area-inset-${side},0px\\)`));
+  }
+  assert.match(css, /aspect-ratio:941 \/ 1672 !important;/);
+  assert.match(css, /#page-home #btn-home-time\{top:60\.15% !important;\}/);
+  assert.match(css, /#page-home #btn-home-practice\{top:71\.41% !important;\}/);
+  assert.match(css, /#page-home #btn-home-wrong,\s*#page-home #btn-home-settings\{\s*top:82\.68% !important;/);
+});
+
+test("10C D/E/F: touch-target rules preserve primary actions and raise short-height keypad minimums", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const marker = css.lastIndexOf("/* Stage 10C safe-area and touch-target stabilization */");
+  const stage10c = css.slice(marker);
+  assert.match(stage10c, /\.modal-close,\s*\.volume-btn\{[\s\S]*?min-width:44px;[\s\S]*?min-height:44px;/);
+  assert.match(stage10c, /#btn-settings-save,\s*#btn-result-retry\{\s*min-height:44px;/);
+  assert.match(stage10c, /\.setting-card\{flex-shrink:0;\}/);
+  assert.match(stage10c, /#btn-settings-save\{flex-shrink:0;\}/);
+  assert.match(stage10c, /#page-play \.top-home-btn\{[\s\S]*?min-height:44px !important;/);
+  assert.match(stage10c, /#page-play #btn-stop,\s*#page-play #btn-submit\{\s*min-height:44px !important;/);
+  assert.match(stage10c, /@media \(max-width:700px\) and \(max-height:640px\)\{[\s\S]*?#page-play \.keypad-btn\{[\s\S]*?min-height:40px !important;/);
+  assert.match(stage10c, /@media \(max-width:700px\) and \(max-height:620px\)\{[\s\S]*?#page-play \.keypad-btn\{[\s\S]*?min-height:36px !important;/);
+  assert.match(css, /\.switch input:focus-visible \+ \.slider\{/);
 });

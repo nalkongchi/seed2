@@ -9,7 +9,8 @@ const STAGE_GROUP_MAP = {
 };
 const EXCLUDED_STAGES = ["채종포 2세대"];
 const COMPLETION_TARGET = 15;
-const TIME_CHECKPOINT_VERSION = 1;
+const TIME_CHECKPOINT_VERSION = 2;
+const LEGACY_TIME_CHECKPOINT_VERSION = 1;
 const TIME_CHECKPOINT_PHASES = ["spin", "answer", "feedback"];
 const STORAGE_KEYS = {
   best: "seedTraining_v1_2_bestTimeAttack",
@@ -35,11 +36,14 @@ const state = {
   spinIntervals: [],
   correct: 0,
   wrong: 0,
+  combo: 0,
+  maxCombo: 0,
   tries: 0,
   recentWrongs: [],
   wrongNotes: [],
   preservedWrongNotes: [],
   settings: { bgmLevel: 3, sfx: true, vibrate: true },
+  settingsDraft: null,
   elapsedMs: 0,
   completionElapsedSeconds: null,
   stopwatchStarted: false,
@@ -60,6 +64,16 @@ const state = {
   currentBgm: null
 };
 
+const modalOpeners = new Map();
+const MODAL_FOCUSABLE_SELECTOR = [
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "a[href]",
+  '[tabindex]:not([tabindex="-1"])'
+].join(",");
+
 function isMobileView() {
   return window.matchMedia("(max-width: 700px)").matches;
 }
@@ -72,15 +86,68 @@ function showPage(id, opts = {}) {
   closeAllModals();
   if (opts.syncBgm !== false) syncBgmForPage(id);
 }
-function openModal(id) {
-  $("page-" + id).classList.add("active");
+function isAvailableFocusable(el) {
+  return !!el && !el.disabled && !el.hidden && el.getAttribute?.("aria-hidden") !== "true" &&
+    !el.classList?.contains("hidden") && !el.closest?.(".hidden") && typeof el.focus === "function";
 }
-function closeModal(id) {
-  const el = $("page-" + id);
-  if (el) el.classList.remove("active");
+function getModalFocusables(modal) {
+  return modal ? [...modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)].filter(isAvailableFocusable) : [];
+}
+function getActiveModal() {
+  return document.querySelector(".modal-layer.active");
+}
+function restoreModalOpener(modal) {
+  const opener = modalOpeners.get(modal);
+  modalOpeners.delete(modal);
+  if (!opener || opener.isConnected === false || !document.contains(opener) || !isAvailableFocusable(opener)) return;
+  opener.focus();
+}
+function openModal(id, opener = document.activeElement) {
+  const modal = $("page-" + id);
+  if (!modal) return;
+  document.querySelectorAll(".modal-layer.active").forEach(active => {
+    if (active !== modal) closeModal(active.id.replace("page-", ""), { restoreFocus: false });
+  });
+  modalOpeners.set(modal, opener);
+  modal.classList.add("active");
+  getModalFocusables(modal)[0]?.focus();
+}
+function closeModal(id, { restoreFocus = true } = {}) {
+  const modal = $("page-" + id);
+  if (!modal || !modal.classList.contains("active")) return;
+  if (id === "settings") discardSettingsDraft();
+  modal.classList.remove("active");
+  if (restoreFocus) restoreModalOpener(modal);
+  else modalOpeners.delete(modal);
 }
 function closeAllModals() {
-  document.querySelectorAll(".modal-layer").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".modal-layer.active").forEach(modal => {
+    closeModal(modal.id.replace("page-", ""), { restoreFocus: false });
+  });
+}
+function handleModalKeydown(e) {
+  const modal = getActiveModal();
+  if (!modal) return false;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    e.stopPropagation();
+    closeModal(modal.id.replace("page-", ""));
+    return true;
+  }
+  if (e.key !== "Tab") return true;
+  const focusables = getModalFocusables(modal);
+  if (!focusables.length) {
+    e.preventDefault();
+    return true;
+  }
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  const current = document.activeElement;
+  if (!modal.contains(current) || (!e.shiftKey && current === last) || (e.shiftKey && current === first)) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  }
+  return true;
 }
 function show(id, visible) {
   const el = $(id);
@@ -120,16 +187,26 @@ function isValidCompletionBest(value) {
 function findQuestionById(id) {
   return QUESTION_SET.find(q => q.id === id && isAllowedQuestion(q)) || null;
 }
+function normalizeTimeCheckpoint(value) {
+  if (!isPlainObject(value) || ![LEGACY_TIME_CHECKPOINT_VERSION, TIME_CHECKPOINT_VERSION].includes(value.version)) return null;
+  if (!Number.isInteger(value.correct) || value.correct < 0 || value.correct >= COMPLETION_TARGET) return null;
+  if (!Number.isInteger(value.tries) || value.tries < value.correct) return null;
+  if (!Number.isInteger(value.wrong) || value.wrong < 0) return null;
+  if (value.tries !== value.correct + value.wrong) return null;
+  if (!Number.isFinite(value.elapsedMs) || value.elapsedMs < 0) return null;
+  if (!TIME_CHECKPOINT_PHASES.includes(value.phase)) return null;
+  if (!isNonEmptyString(value.questionId) || !findQuestionById(value.questionId)) return null;
+  if (!Array.isArray(value.recentWrongIds) || !value.recentWrongIds.every(id => typeof id === "string")) return null;
+  if (value.version === LEGACY_TIME_CHECKPOINT_VERSION) {
+    return { ...value, version: TIME_CHECKPOINT_VERSION, combo: 0, maxCombo: 0 };
+  }
+  if (!Number.isInteger(value.combo) || value.combo < 0) return null;
+  if (!Number.isInteger(value.maxCombo) || value.maxCombo < 0) return null;
+  if (value.combo > value.maxCombo || value.combo > value.correct || value.maxCombo > value.correct) return null;
+  return { ...value };
+}
 function isValidTimeCheckpoint(value) {
-  if (!isPlainObject(value) || value.version !== TIME_CHECKPOINT_VERSION) return false;
-  if (!Number.isInteger(value.correct) || value.correct < 0 || value.correct >= COMPLETION_TARGET) return false;
-  if (!Number.isInteger(value.tries) || value.tries < value.correct) return false;
-  if (!Number.isInteger(value.wrong) || value.wrong < 0) return false;
-  if (value.tries !== value.correct + value.wrong) return false;
-  if (!Number.isFinite(value.elapsedMs) || value.elapsedMs < 0) return false;
-  if (!TIME_CHECKPOINT_PHASES.includes(value.phase)) return false;
-  if (!isNonEmptyString(value.questionId) || !findQuestionById(value.questionId)) return false;
-  return Array.isArray(value.recentWrongIds) && value.recentWrongIds.every(id => typeof id === "string");
+  return normalizeTimeCheckpoint(value) !== null;
 }
 function readJSON(key) {
   try {
@@ -208,12 +285,12 @@ function preventImageLongPress() {
   document.addEventListener("dragstart", stopImageMenu, { capture: true });
 }
 
-function getBgmVolume() {
-  const level = Math.max(0, Math.min(5, Number(state.settings.bgmLevel ?? 3)));
+function getBgmVolume(settings = state.settings) {
+  const level = Math.max(0, Math.min(5, Number(settings?.bgmLevel ?? 3)));
   return [0, 0.14, 0.26, 0.42, 0.55, 0.70][level] || 0;
 }
-function applyAudioVolumes() {
-  const bgmVol = getBgmVolume();
+function applyAudioVolumes(settings = state.settings) {
+  const bgmVol = getBgmVolume(settings);
   ["bgm-home","bgm-play","bgm-play2"].forEach(id => {
     const el = $(id);
     if (el) el.volume = bgmVol;
@@ -315,10 +392,60 @@ function updateBgmVolumeUI() {
   const el = $("bgm-volume-level");
   if (el) el.textContent = String(state.settings.bgmLevel ?? 3);
 }
+function updateSettingsDraftUI() {
+  const draft = state.settingsDraft || state.settings;
+  const level = $("bgm-volume-level");
+  if (level) level.textContent = String(draft.bgmLevel ?? 3);
+  const sfx = $("toggle-sfx");
+  if (sfx) sfx.checked = !!draft.sfx;
+  const vibrate = $("toggle-vibrate");
+  if (vibrate) vibrate.checked = !!draft.vibrate;
+}
+function beginSettingsEdit() {
+  state.settingsDraft = { ...state.settings };
+  updateSettingsDraftUI();
+}
+function syncSettingsDraftFromUI() {
+  if (!state.settingsDraft) return;
+  state.settingsDraft.sfx = !!$("toggle-sfx")?.checked;
+  state.settingsDraft.vibrate = !!$("toggle-vibrate")?.checked;
+}
+function restoreCommittedAudio() {
+  applyAudioVolumes(state.settings);
+  if (state.settings.bgmLevel <= 0) stopAllBgm();
+  else syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
+}
+function discardSettingsDraft() {
+  if (!state.settingsDraft) return;
+  state.settingsDraft = null;
+  updateSettingsDraftUI();
+  restoreCommittedAudio();
+}
+function previewBgmLevel() {
+  const draft = state.settingsDraft;
+  if (!draft) return;
+  applyAudioVolumes(draft);
+  if (draft.bgmLevel <= 0) {
+    stopAllBgm();
+    return;
+  }
+  const current = state.currentBgm && $(state.currentBgm);
+  if (current && current.paused) {
+    try {
+      const promise = current.play();
+      if (promise && typeof promise.catch === "function") promise.catch(() => {});
+    } catch (e) {}
+  }
+}
 function adjustBgmLevel(delta) {
   prepareAudio();
-  state.settings.bgmLevel = Math.max(0, Math.min(5, Number(state.settings.bgmLevel ?? 3) + delta));
-  updateBgmVolumeUI();
+  const target = state.settingsDraft || state.settings;
+  target.bgmLevel = Math.max(0, Math.min(5, Number(target.bgmLevel ?? 3) + delta));
+  updateSettingsDraftUI();
+  if (state.settingsDraft) {
+    previewBgmLevel();
+    return;
+  }
   applyAudioVolumes();
   saveJSON(STORAGE_KEYS.settings, state.settings);
   if (state.settings.bgmLevel <= 0) stopAllBgm();
@@ -332,19 +459,23 @@ function loadSettings() {
     !Object.prototype.hasOwnProperty.call(raw, "bgmLevel") &&
     (raw.bgm === false || raw.bgm === true);
   state.settings = normalizeSettings(raw);
+  state.settingsDraft = null;
   updateBgmVolumeUI();
   $("toggle-sfx").checked = !!state.settings.sfx;
   $("toggle-vibrate").checked = !!state.settings.vibrate;
   if (shouldMigrateLegacyBgm) saveJSON(STORAGE_KEYS.settings, state.settings);
 }
 function saveSettings() {
-  state.settings.sfx = $("toggle-sfx").checked;
-  state.settings.vibrate = $("toggle-vibrate").checked;
-  state.settings.bgmLevel = Math.max(0, Math.min(5, Number(state.settings.bgmLevel ?? 3)));
+  if (state.settingsDraft) syncSettingsDraftFromUI();
+  else {
+    state.settings.sfx = !!$("toggle-sfx")?.checked;
+    state.settings.vibrate = !!$("toggle-vibrate")?.checked;
+  }
+  state.settings = normalizeSettings(state.settingsDraft || state.settings);
+  state.settingsDraft = null;
   saveJSON(STORAGE_KEYS.settings, state.settings);
-  applyAudioVolumes();
-  if (state.settings.bgmLevel <= 0) stopAllBgm();
-  else syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
+  restoreCommittedAudio();
+  updateSettingsDraftUI();
   setFeedback("설정을 저장했어요.", "");
   maybeBeep("button");
 }
@@ -454,9 +585,7 @@ function isBetterCompletionRecord(candidate, previous) {
 }
 function loadTimeCheckpoint() {
   const stored = readJSON(STORAGE_KEYS.inProgress);
-  state.timeCheckpoint = stored.ok && stored.exists && isValidTimeCheckpoint(stored.value)
-    ? stored.value
-    : null;
+  state.timeCheckpoint = stored.ok && stored.exists ? normalizeTimeCheckpoint(stored.value) : null;
   return state.timeCheckpoint;
 }
 function buildTimeCheckpoint(phase = state.runPhase) {
@@ -466,6 +595,8 @@ function buildTimeCheckpoint(phase = state.runPhase) {
     correct: state.correct,
     tries: state.tries,
     wrong: state.wrong,
+    combo: state.combo,
+    maxCombo: state.maxCombo,
     elapsedMs: getElapsedMilliseconds(),
     phase,
     questionId,
@@ -601,6 +732,8 @@ function resetRunCommon() {
   state.scored = false;
   state.correct = 0;
   state.wrong = 0;
+  state.combo = 0;
+  state.maxCombo = 0;
   state.tries = 0;
   state.recentWrongs = [];
   state.runEnded = false;
@@ -612,6 +745,7 @@ function resetRunCommon() {
   state.runPhase = "idle";
   $("ans").value = "";
   $("ans").className = "ans-input";
+  $("ans").setAttribute("aria-invalid", "false");
   $("ans").placeholder = "숫자 입력";
   setText("answer-guide", "");
   show("input-row", false);
@@ -619,6 +753,7 @@ function resetRunCommon() {
   show("btn-submit", false);
   show("btn-stop", false);
   setFeedback("", "");
+  $("ans").setAttribute("aria-invalid", "false");
   setQuestionText("문제를 불러오는 중...");
   setText("answer-guide", "");
   resetSlots();
@@ -695,6 +830,8 @@ function resumeTimeMode() {
   state.wrong = checkpoint.wrong;
   state.elapsedMs = checkpoint.elapsedMs;
   state.recentWrongs = checkpoint.recentWrongIds.map(findQuestionById).filter(Boolean);
+  state.combo = checkpoint.combo;
+  state.maxCombo = checkpoint.maxCombo;
   state.curQuestion = question;
   state.runPhase = checkpoint.phase;
   updatePlayHeader();
@@ -1003,10 +1140,13 @@ function syncPlayControlsForViewport() {
   show("btn-stop", false);
 }
 
-function formatFeedback(q, isCorrect) {
+function formatFeedback(q, isCorrect, combo = state.combo) {
   const word = isCorrect ? "정답!" : "오답!";
   const criteria = `${q.item} ${q.stage} ${q.answer}${q.unit || ""}`;
-  return `<span class="result-word">${word}</span><span class="criteria">${escapeHTML(criteria)}</span>`;
+  const streak = isCorrect && combo >= 3
+    ? `<span class="streak">🔥 ${combo}연속!</span>`
+    : "";
+  return `<span class="result-word">${word}</span><span class="criteria">${escapeHTML(criteria)}</span>${streak}`;
 }
 
 function startRound(restoredQuestion = null) {
@@ -1019,6 +1159,7 @@ function startRound(restoredQuestion = null) {
   setText("shell-hint", "STOP으로 확정");
   $("ans").value = "";
   $("ans").className = "ans-input";
+  $("ans").setAttribute("aria-invalid", "false");
   $("ans").placeholder = "숫자 입력";
   setText("answer-guide", "");
   setFeedback("", "");
@@ -1088,6 +1229,7 @@ function showCurrentQuestionForAnswer() {
     $(id).classList.add("stopped");
   });
   setFeedback("", "");
+  $("ans").setAttribute("aria-invalid", "false");
   setQuestionText(formatQuestionHTML(q));
   setText("answer-guide", getAnswerGuideText(q));
   $("ans").placeholder = getAnswerPlaceholder(q);
@@ -1157,6 +1299,7 @@ function evaluateAnswer() {
   const raw = normalizeAnswer($("ans").value);
   if (raw === "" || !isValidAnswerFormat(raw)) {
     $("ans").classList.add("ng");
+    $("ans").setAttribute("aria-invalid", "true");
     clearTimeout(state.ngTimeout);
     state.ngTimeout = setTimeout(() => $("ans").classList.remove("ng"), 450);
     return;
@@ -1168,18 +1311,23 @@ function evaluateAnswer() {
   let completedTimeMode = false;
   if (isCorrect) {
     state.correct += 1;
+    state.combo += 1;
+    state.maxCombo = Math.max(state.maxCombo, state.combo);
     completedTimeMode = state.mode === "time" && state.correct >= COMPLETION_TARGET;
     if (completedTimeMode) freezeStopwatch();
     $("ans").classList.add("ok");
+    $("ans").setAttribute("aria-invalid", "false");
     setFeedback(
-      completedTimeMode ? "🎉 15개 정답 달성!" : formatFeedback(state.curQuestion, true),
+      completedTimeMode ? "🎉 15개 정답 달성!" : formatFeedback(state.curQuestion, true, state.combo),
       "ok"
     );
     playEffect("se-correct", "correct");
     maybeVibrate([40]);
   } else {
     state.wrong += 1;
+    state.combo = 0;
     $("ans").classList.add("ng");
+    $("ans").setAttribute("aria-invalid", "true");
     setFeedback(formatFeedback(state.curQuestion, false), "ng");
     playEffect("se-wrong", "wrong");
     maybeVibrate([50, 70, 40]);
@@ -1265,6 +1413,7 @@ function finishTimeMode() {
   setText("r-tries", String(state.tries));
   setText("r-acc", `${acc}%`);
   setText("r-wrong", String(state.wrong));
+  setText("r-max-combo", String(state.maxCombo));
   renderResultWrongs();
   showPage("result", { syncBgm: false });
   if (isNew) launchConfetti();
@@ -1451,10 +1600,10 @@ function bindEvents() {
   $("page-home").addEventListener("touchstart", homeInteract, { passive: true });
   $("page-home").addEventListener("click", homeInteract, { passive: true });
 
-  $("btn-home-time").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); renderTimeIntro(); openModal("time-intro"); });
-  $("btn-home-practice").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup"); });
-  $("btn-home-wrong").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); renderWrongPage(); openModal("wrong"); });
-  $("btn-home-settings").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); openModal("settings"); });
+  $("btn-home-time").addEventListener("click", (e) => { ensureHomeBgm(); maybeBeep("button"); renderTimeIntro(); openModal("time-intro", e.currentTarget); });
+  $("btn-home-practice").addEventListener("click", (e) => { ensureHomeBgm(); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup", e.currentTarget); });
+  $("btn-home-wrong").addEventListener("click", (e) => { ensureHomeBgm(); maybeBeep("button"); renderWrongPage(); openModal("wrong", e.currentTarget); });
+  $("btn-home-settings").addEventListener("click", (e) => { ensureHomeBgm(); maybeBeep("button"); beginSettingsEdit(); openModal("settings", e.currentTarget); });
 
   $("btn-time-intro-close").addEventListener("click", () => { maybeBeep("button"); closeModal("time-intro"); });
   $("btn-time-intro-start").addEventListener("click", () => { maybeBeep("button"); startTimeMode(); });
@@ -1482,14 +1631,16 @@ function bindEvents() {
   $("btn-wrong-close").addEventListener("click", () => { maybeBeep("button"); closeModal("wrong"); });
 
   $("btn-settings-save").addEventListener("click", () => { maybeBeep("button"); saveSettings(); closeModal("settings"); });
-  $("btn-settings-close").addEventListener("click", () => { maybeBeep("button"); closeModal("settings"); });
+  $("btn-settings-close").addEventListener("click", () => { maybeBeep("button"); discardSettingsDraft(); closeModal("settings"); });
   $("btn-bgm-down").addEventListener("click", () => { maybeBeep("button"); adjustBgmLevel(-1); });
   $("btn-bgm-up").addEventListener("click", () => { maybeBeep("button"); adjustBgmLevel(1); });
+  $("toggle-sfx").addEventListener("change", syncSettingsDraftFromUI);
+  $("toggle-vibrate").addEventListener("change", syncSettingsDraftFromUI);
 
   document.addEventListener("keydown", (e) => {
+    if (handleModalKeydown(e)) return;
     if (e.key !== "Enter" || e.repeat || e.isComposing) return;
     if (!$("page-play")?.classList.contains("active") || state.runEnded) return;
-    if (document.querySelector(".modal-layer.active")) return;
 
     // PC 키보드 흐름: 룰렛 회전 중 Enter = STOP, 문제 확정 후 Enter = 제출
     if (state.spinning) {
@@ -1518,7 +1669,8 @@ function bindEvents() {
 
   document.querySelectorAll(".modal-layer").forEach(layer => {
     layer.addEventListener("click", (e) => {
-      if (e.target === layer) layer.classList.remove("active");
+      if (e.target !== layer) return;
+      closeModal(layer.id.replace("page-", ""));
     });
   });
 }

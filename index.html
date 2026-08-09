@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
 <title>규격 마스터 챌린지</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -57,13 +57,13 @@
 </section>
 
 
-<section id="page-time-intro" class="page modal-layer">
+<section id="page-time-intro" class="page modal-layer" role="dialog" aria-modal="true" aria-labelledby="time-intro-title">
   <div class="modal-window panel">
     <button class="modal-close" id="btn-time-intro-close" aria-label="닫기">✕</button>
     <div class="section-head">
       <div>
         <div class="section-title">Time Attack</div>
-        <h2 class="modal-title">실전모드 안내</h2>
+        <h2 class="modal-title" id="time-intro-title">실전모드 안내</h2>
       </div>
     </div>
 
@@ -89,13 +89,13 @@
   </div>
 </section>
 
-<section id="page-practice-setup" class="page modal-layer">
+<section id="page-practice-setup" class="page modal-layer" role="dialog" aria-modal="true" aria-labelledby="practice-setup-title">
   <div class="modal-window panel">
     <button class="modal-close" id="btn-practice-close" aria-label="닫기">✕</button>
     <div class="section-head">
       <div>
         <div class="section-title">Practice Setup</div>
-        <h2 class="setup-title modal-title">연습모드 범위선택</h2>
+        <h2 class="setup-title modal-title" id="practice-setup-title">연습모드 범위선택</h2>
       </div>
     </div>
 
@@ -164,13 +164,13 @@
     </div>
   </div>
 
-  <div class="q-text" id="q-text">문제를 불러오는 중...</div>
+  <div class="q-text" id="q-text" aria-live="polite" aria-atomic="true">문제를 불러오는 중...</div>
   <div class="answer-guide play-answer-guide" id="answer-guide"></div>
 
   <div class="answer-zone" id="answer-zone">
-    <div class="feedback hidden" id="feedback"></div>
+    <div class="feedback hidden" id="feedback" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="input-row hidden" id="input-row">
-      <input class="ans-input" id="ans" type="text" inputmode="decimal" placeholder="숫자 입력" autocomplete="off"/>
+      <input class="ans-input" id="ans" type="text" inputmode="decimal" aria-label="정답 입력" aria-invalid="false" placeholder="숫자 입력" autocomplete="off"/>
       <div class="unit-tag" id="unit-tag">%</div>
     </div>
     <div class="mobile-keypad hidden" id="mobile-keypad" aria-label="숫자 키패드">
@@ -226,6 +226,11 @@
         <div class="sc-val" id="r-wrong">0</div>
         <div class="sc-sub">회</div>
       </div>
+      <div class="stat-card">
+        <div class="sc-lbl">최대 연속</div>
+        <div class="sc-val" id="r-max-combo">0</div>
+        <div class="sc-sub">콤보</div>
+      </div>
     </div>
 
     <div class="wrong-panel panel result-wrong-panel">
@@ -243,13 +248,13 @@
   </div>
 </section>
 
-<section id="page-wrong" class="page modal-layer">
+<section id="page-wrong" class="page modal-layer" role="dialog" aria-modal="true" aria-labelledby="wrong-title">
   <div class="modal-window panel">
     <button class="modal-close" id="btn-wrong-close" aria-label="닫기">✕</button>
     <div class="section-head">
       <div>
         <div class="section-title">Wrong Notes</div>
-        <h2 class="modal-title">오답노트</h2>
+        <h2 class="modal-title" id="wrong-title">오답노트</h2>
       </div>
       <div class="pill"><strong id="wrong-total">0</strong> 개</div>
     </div>
@@ -265,13 +270,13 @@
   </div>
 </section>
 
-<section id="page-settings" class="page modal-layer">
+<section id="page-settings" class="page modal-layer" role="dialog" aria-modal="true" aria-labelledby="settings-title">
   <div class="modal-window panel">
     <button class="modal-close" id="btn-settings-close" aria-label="닫기">✕</button>
     <div class="section-head">
       <div>
         <div class="section-title">Settings</div>
-        <h2 class="modal-title">설정</h2>
+        <h2 class="modal-title" id="settings-title">설정</h2>
       </div>
       <div class="pill">v1.2-33</div>
     </div>
@@ -295,7 +300,7 @@
           <span>정답/오답/종료 효과음을 켭니다.</span>
         </div>
         <div class="switch">
-          <input type="checkbox" id="toggle-sfx">
+          <input type="checkbox" id="toggle-sfx" aria-label="효과음">
           <span class="slider"></span>
         </div>
       </label>
@@ -306,7 +311,7 @@
           <span>지원 기기에서 진동합니다.</span>
         </div>
         <div class="switch">
-          <input type="checkbox" id="toggle-vibrate">
+          <input type="checkbox" id="toggle-vibrate" aria-label="진동">
           <span class="slider"></span>
         </div>
       </label>
