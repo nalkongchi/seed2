@@ -10,6 +10,7 @@ const APP_SOURCE = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8") + `
 globalThis.__storageTest = {
   STORAGE_KEYS,
   COMPLETION_TARGET,
+  TIME_CHECKPOINT_VERSION,
   QUESTION_SET,
   state,
   init,
@@ -17,23 +18,37 @@ globalThis.__storageTest = {
   loadWrongNotes,
   loadBestRecord,
   loadCompletionBest,
+  loadTimeCheckpoint,
+  saveTimeCheckpoint,
+  clearTimeCheckpoint,
+  buildTimeCheckpoint,
+  renderTimeIntro,
   evaluateAnswer,
   finishTimeMode,
   startTimeMode,
+  resumeTimeMode,
+  startNewTimeModeFromCheckpoint,
   startPracticeMode,
   startStopwatch,
   getElapsedSeconds,
   handleVisibilityChange,
+  handlePageHide,
   isBetterCompletionRecord,
   weightedPick,
   pickQuestion,
   stopSpin,
+  handleQuitPlay,
   saveSettings,
   pushWrongNote,
   clearWrongNotes,
   startWrongPracticeMode,
   renderWrongPage,
-  makeNoteItem
+  makeNoteItem,
+  isAnswerCorrect,
+  getAnswerGuideText,
+  getAnswerPlaceholder,
+  formatFeedback,
+  syncPlayControlsForViewport
 };`;
 
 class FakeClassList {
@@ -68,8 +83,15 @@ class FakeElement {
     this.paused = true;
     this.currentTime = 0;
     this.volume = 1;
+    this.listeners = new Map();
   }
-  addEventListener() {}
+  addEventListener(type, listener) {
+    if (!this.listeners.has(type)) this.listeners.set(type, []);
+    this.listeners.get(type).push(listener);
+  }
+  click() {
+    (this.listeners.get("click") || []).forEach(listener => listener({ target: this }));
+  }
   setAttribute() {}
   appendChild(child) { this.children.push(child); return child; }
   closest() { return null; }
@@ -86,6 +108,7 @@ class FakeElement {
 function createStorage(initialStorage = {}, options = {}) {
   const values = new Map(Object.entries(initialStorage));
   let setCalls = 0;
+  let removeCalls = 0;
   return {
     getItem(key) { return values.has(key) ? values.get(key) : null; },
     setItem(key, value) {
@@ -93,8 +116,14 @@ function createStorage(initialStorage = {}, options = {}) {
       if (options.throwOnSet) throw new Error("forced setItem failure");
       values.set(key, String(value));
     },
+    removeItem(key) {
+      removeCalls += 1;
+      if (options.throwOnRemove) throw new Error("forced removeItem failure");
+      values.delete(key);
+    },
     raw(key) { return values.get(key); },
-    setCalls() { return setCalls; }
+    setCalls() { return setCalls; },
+    removeCalls() { return removeCalls; }
   };
 }
 
@@ -103,8 +132,10 @@ function createRuntime(initialStorage = {}, options = {}) {
   const timeouts = new Map();
   const intervals = new Map();
   const documentListeners = new Map();
+  const windowListeners = new Map();
   let nextTimerId = 1;
   let nowMs = options.nowMs || 0;
+  let viewportWidth = options.viewportWidth || 1000;
 
   const getElement = id => {
     if (!elements.has(id)) elements.set(id, new FakeElement(id));
@@ -143,11 +174,19 @@ function createRuntime(initialStorage = {}, options = {}) {
     localStorage,
     navigator: { vibrate() {} },
     window: {
-      matchMedia: () => ({ matches: false }),
-      addEventListener() {},
-      removeEventListener() {}
+      matchMedia: query => ({
+        matches: query === "(max-width: 700px)" && viewportWidth <= 700
+      }),
+      addEventListener(type, listener) {
+        if (!windowListeners.has(type)) windowListeners.set(type, []);
+        windowListeners.get(type).push(listener);
+      },
+      removeEventListener(type, listener) {
+        const listeners = windowListeners.get(type) || [];
+        windowListeners.set(type, listeners.filter(item => item !== listener));
+      }
     },
-    confirm: () => true,
+    confirm: () => options.confirmResult !== false,
     alert() {},
     Math,
     Date,
@@ -175,10 +214,18 @@ function createRuntime(initialStorage = {}, options = {}) {
     element: getElement,
     raw: key => localStorage.raw(key),
     setCalls: () => localStorage.setCalls(),
+    removeCalls: () => localStorage.removeCalls(),
     advance(ms) { nowMs += ms; },
     setHidden(hidden) {
       document.hidden = hidden;
       (documentListeners.get("visibilitychange") || []).forEach(listener => listener());
+    },
+    triggerPageHide() {
+      (windowListeners.get("pagehide") || []).forEach(listener => listener());
+    },
+    resizeTo(width) {
+      viewportWidth = width;
+      (windowListeners.get("resize") || []).forEach(listener => listener());
     },
     runInterval(delay, count = 1) {
       for (let i = 0; i < count; i += 1) {
@@ -190,6 +237,9 @@ function createRuntime(initialStorage = {}, options = {}) {
     },
     intervalCount(delay) {
       return [...intervals.values()].filter(timer => typeof delay === "undefined" || timer.delay === delay).length;
+    },
+    timeoutCount(delay) {
+      return [...timeouts.values()].filter(timer => typeof delay === "undefined" || timer.delay === delay).length;
     },
     runTimeout(delay) {
       const pending = [...timeouts.entries()].filter(([, timer]) => timer.delay === delay);
@@ -249,7 +299,8 @@ test("C: invalid JSON은 원문을 덮어쓰지 않고 fallback으로 부팅한�
     [seed.api.STORAGE_KEYS.settings]: invalid,
     [seed.api.STORAGE_KEYS.wrongs]: invalid,
     [seed.api.STORAGE_KEYS.best]: invalid,
-    [seed.api.STORAGE_KEYS.completionBest]: invalid
+    [seed.api.STORAGE_KEYS.completionBest]: invalid,
+    [seed.api.STORAGE_KEYS.inProgress]: invalid
   });
   runtime.api.init();
   assert.equal(runtime.element("page-home").classList.contains("active"), true);
@@ -797,6 +848,704 @@ test("3단계 P/Q: 연습·오답연습과 manual STOP·가중 선택 구조를 
   assert.equal(runtime.api.state.spinning, false);
   assert.equal(runtime.api.state.curQuestion.id, question.id);
   assert.match(APP_SOURCE, /getStageWeight\(q\.stage\) \* getCropWeight\(q\.crop\)/);
-  assert.match(APP_SOURCE, /state\.curQuestion = pickQuestion\(\);/);
+  assert.match(APP_SOURCE, /state\.curQuestion = restoredQuestion \|\| pickQuestion\(\);/);
   assert.doesNotMatch(APP_SOURCE, /setTimeout\([^)]*stopSpin/);
+});
+
+function makeCheckpoint(runtime, overrides = {}) {
+  const question = runtime.api.QUESTION_SET[0];
+  return {
+    version: runtime.api.TIME_CHECKPOINT_VERSION,
+    correct: 3,
+    tries: 5,
+    wrong: 2,
+    elapsedMs: 12345,
+    phase: "spin",
+    questionId: question.id,
+    recentWrongIds: [question.id],
+    ...overrides
+  };
+}
+
+test("4단계 A: 체크포인트가 없으면 기존 실전 시작 버튼만 표시한다", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.element("btn-home-time").click();
+  assert.equal(runtime.api.state.timeCheckpoint, null);
+  assert.equal(runtime.element("btn-time-intro-start").classList.contains("hidden"), false);
+  assert.equal(runtime.element("time-resume-card").classList.contains("hidden"), true);
+  assert.equal(runtime.element("time-resume-actions").classList.contains("hidden"), true);
+});
+
+test("4단계 B/C: 첫 실제 round부터 spin 체크포인트를 저장하고 reload 요약을 복원한다", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  assert.equal(runtime.raw(runtime.api.STORAGE_KEYS.inProgress), undefined);
+  runtime.runInterval(700, 3);
+  const saved = JSON.parse(runtime.raw(runtime.api.STORAGE_KEYS.inProgress));
+  assert.equal(saved.phase, "spin");
+  assert.equal(saved.correct, 0);
+  assert.equal(saved.elapsedMs, 0);
+  assert.equal(saved.questionId, runtime.api.state.curQuestion.id);
+
+  const reloaded = createRuntime({
+    [runtime.api.STORAGE_KEYS.inProgress]: json(saved)
+  });
+  reloaded.api.init();
+  reloaded.element("btn-home-time").click();
+  assert.equal(reloaded.element("btn-time-intro-start").classList.contains("hidden"), true);
+  assert.equal(reloaded.element("time-resume-card").classList.contains("hidden"), false);
+  assert.equal(reloaded.element("time-resume-summary").textContent.includes("3"), false);
+  assert.equal(reloaded.element("time-resume-summary").textContent.includes("0 / 15"), true);
+});
+
+test("4단계 D/E: spin 이어하기는 countdown 없이 같은 문제를 다시 회전시킨다", () => {
+  const seed = createRuntime();
+  const checkpoint = makeCheckpoint(seed, { phase: "spin" });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  assert.equal(runtime.api.state.curQuestion.id, checkpoint.questionId);
+  assert.equal(runtime.api.state.spinning, true);
+  assert.equal(runtime.api.state.correct, 3);
+  assert.equal(runtime.api.state.tries, 5);
+  assert.equal(runtime.api.state.wrong, 2);
+  assert.equal(runtime.api.state.recentWrongs[0].id, checkpoint.questionId);
+  assert.equal(runtime.intervalCount(700), 0);
+  assert.equal(runtime.intervalCount(250), 1);
+});
+
+test("4단계 C: 앱을 닫아둔 시간은 제외하고 resume 이후 active 시간만 더한다", () => {
+  const seed = createRuntime();
+  const checkpoint = makeCheckpoint(seed, {
+    correct: 7,
+    tries: 9,
+    wrong: 2,
+    elapsedMs: 154321
+  });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  }, { nowMs: 1800000 });
+  runtime.api.init();
+  runtime.element("btn-home-time").click();
+  assert.equal(runtime.element("time-resume-summary").textContent, "정답 7 / 15 · 플레이 시간 02:34");
+  runtime.api.resumeTimeMode();
+  assert.equal(runtime.api.buildTimeCheckpoint().elapsedMs, 154321);
+  runtime.advance(5000);
+  assert.equal(runtime.api.buildTimeCheckpoint().elapsedMs, 159321);
+});
+
+test("4단계 F: answer 이어하기는 같은 문제와 입력 단계를 복원한다", () => {
+  const seed = createRuntime();
+  const checkpoint = makeCheckpoint(seed, { phase: "answer" });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  assert.equal(runtime.api.state.curQuestion.id, checkpoint.questionId);
+  assert.equal(runtime.api.state.spinning, false);
+  assert.equal(runtime.api.state.scored, false);
+  assert.equal(runtime.element("input-row").classList.contains("hidden"), false);
+  assert.equal(runtime.element("btn-submit").classList.contains("hidden"), false);
+  assert.equal(JSON.parse(runtime.raw(seed.api.STORAGE_KEYS.inProgress)).phase, "answer");
+});
+
+test("4단계 G: feedback 이어하기는 이미 채점된 문제를 재채점하지 않고 다음 round로 간다", () => {
+  const seed = createRuntime();
+  const checkpoint = makeCheckpoint(seed, { phase: "feedback" });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  assert.equal(runtime.api.state.correct, checkpoint.correct);
+  assert.equal(runtime.api.state.tries, checkpoint.tries);
+  assert.equal(runtime.api.state.wrong, checkpoint.wrong);
+  assert.equal(runtime.api.state.spinning, true);
+  assert.notEqual(runtime.api.state.curQuestion.id, checkpoint.questionId);
+  assert.equal(JSON.parse(runtime.raw(seed.api.STORAGE_KEYS.inProgress)).phase, "spin");
+});
+
+test("4단계 G2: 복원한 recent wrong은 완료 결과의 이번 판 오답에 유지된다", () => {
+  const seed = createRuntime();
+  const [q1, q2, q3] = seed.api.QUESTION_SET;
+  const checkpoint = makeCheckpoint(seed, {
+    correct: 14,
+    tries: 16,
+    wrong: 2,
+    elapsedMs: 30000,
+    phase: "answer",
+    questionId: q3.id,
+    recentWrongIds: [q1.id, q2.id]
+  });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  runtime.element("ans").value = q3.answer;
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.element("page-result").classList.contains("active"), true);
+  assert.equal(runtime.api.state.recentWrongs.length, 2);
+  assert.equal(runtime.element("result-wrong-list").children.length, 2);
+});
+
+test("4단계 G3: recent wrong의 미존재 ID는 checkpoint 전체를 깨지 않고 해당 항목만 격리한다", () => {
+  const seed = createRuntime();
+  const [question] = seed.api.QUESTION_SET;
+  const checkpoint = makeCheckpoint(seed, {
+    recentWrongIds: [question.id, "missing-question-id"]
+  });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  assert.deepEqual(plain(runtime.api.state.recentWrongs.map(q => q.id)), [question.id]);
+});
+
+test("4단계 H/I: hidden 및 pagehide 저장은 비활성 시간을 누적하지 않는다", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  runtime.advance(10000);
+  runtime.setHidden(true);
+  let saved = JSON.parse(runtime.raw(runtime.api.STORAGE_KEYS.inProgress));
+  assert.equal(saved.elapsedMs, 10000);
+  runtime.advance(30000);
+  runtime.setHidden(false);
+  runtime.advance(5000);
+  runtime.triggerPageHide();
+  saved = JSON.parse(runtime.raw(runtime.api.STORAGE_KEYS.inProgress));
+  assert.equal(saved.elapsedMs, 15000);
+  assert.equal(runtime.api.getElapsedSeconds(), 15);
+});
+
+test("4단계 J: 확인한 실전 종료는 현재 phase를 저장하고 홈에서 이어갈 수 있다", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  runtime.api.stopSpin();
+  const questionId = runtime.api.state.curQuestion.id;
+  runtime.api.state.correct = 7;
+  runtime.api.state.tries = 9;
+  runtime.api.state.wrong = 2;
+  runtime.api.saveTimeCheckpoint("answer");
+  runtime.advance(4200);
+  runtime.api.handleQuitPlay();
+  const saved = JSON.parse(runtime.raw(runtime.api.STORAGE_KEYS.inProgress));
+  assert.equal(saved.phase, "answer");
+  assert.equal(saved.questionId, questionId);
+  assert.equal(saved.elapsedMs, 4200);
+  assert.equal(runtime.element("page-home").classList.contains("active"), true);
+  runtime.element("btn-home-time").click();
+  assert.equal(runtime.element("time-resume-summary").textContent, "정답 7 / 15 · 플레이 시간 00:04");
+  assert.equal(runtime.element("btn-time-resume").classList.contains("hidden"), false);
+  assert.equal(runtime.element("btn-time-new").classList.contains("hidden"), false);
+  assert.equal(runtime.element("btn-time-intro-start").classList.contains("hidden"), true);
+});
+
+test("4단계 K: 실전 종료 확인 취소는 진행과 저장값을 변경하지 않는다", () => {
+  const runtime = createRuntime({}, { confirmResult: false });
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  const before = runtime.raw(runtime.api.STORAGE_KEYS.inProgress);
+  runtime.api.handleQuitPlay();
+  assert.equal(runtime.api.state.runEnded, false);
+  assert.equal(runtime.api.state.stopwatchRunning, true);
+  assert.equal(runtime.raw(runtime.api.STORAGE_KEYS.inProgress), before);
+  assert.equal(runtime.element("page-play").classList.contains("active"), true);
+});
+
+test("4단계 L: 새로 시작 확인 취소는 체크포인트를 보존한다", () => {
+  const seed = createRuntime();
+  const checkpoint = makeCheckpoint(seed);
+  const raw = json(checkpoint);
+  const runtime = createRuntime(
+    { [seed.api.STORAGE_KEYS.inProgress]: raw },
+    { confirmResult: false }
+  );
+  runtime.api.init();
+  runtime.api.startNewTimeModeFromCheckpoint();
+  assert.equal(runtime.raw(seed.api.STORAGE_KEYS.inProgress), raw);
+  assert.equal(runtime.api.state.timeCheckpoint.questionId, checkpoint.questionId);
+  assert.equal(runtime.intervalCount(700), 0);
+});
+
+test("4단계 M: 새로 시작 확인은 기존 체크포인트를 삭제하고 0/15 countdown을 시작한다", () => {
+  const seed = createRuntime();
+  const checkpoint = makeCheckpoint(seed);
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  });
+  runtime.api.init();
+  runtime.api.startNewTimeModeFromCheckpoint();
+  assert.equal(runtime.raw(seed.api.STORAGE_KEYS.inProgress), undefined);
+  assert.equal(runtime.api.state.timeCheckpoint, null);
+  assert.equal(runtime.api.state.correct, 0);
+  assert.equal(runtime.api.state.tries, 0);
+  assert.equal(runtime.intervalCount(700), 1);
+});
+
+test("4단계 N/O: 완료는 체크포인트를 삭제하고 removeItem 실패에도 결과를 표시한다", () => {
+  const seed = createRuntime();
+  const checkpoint = makeCheckpoint(seed, { correct: 14, tries: 16, wrong: 2 });
+  const runtime = createRuntime(
+    { [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint) },
+    { throwOnRemove: true }
+  );
+  runtime.api.init();
+  runtime.api.state.mode = "time";
+  runtime.api.state.correct = 15;
+  runtime.api.state.tries = 17;
+  runtime.api.state.wrong = 2;
+  runtime.api.state.elapsedMs = 50000;
+  assert.doesNotThrow(() => runtime.api.finishTimeMode());
+  assert.equal(runtime.api.state.timeCheckpoint, null);
+  assert.equal(runtime.element("page-result").classList.contains("active"), true);
+  assert.equal(runtime.removeCalls(), 1);
+  const reloaded = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: runtime.raw(seed.api.STORAGE_KEYS.inProgress)
+  });
+  reloaded.api.init();
+  assert.equal(reloaded.api.state.timeCheckpoint, null);
+});
+
+for (const [name, raw] of [
+  ["invalid JSON", "{bad-json"],
+  ["null", json(null)],
+  ["empty object", json({})],
+  ["array", json([])],
+  ["string", json("checkpoint")],
+  ["number", json(7)],
+  ["wrong version", json({ version: 999 })],
+  ["completed correct", json(makeCheckpoint(createRuntime(), { correct: 15, tries: 17 }))],
+  ["invalid counters", json(makeCheckpoint(createRuntime(), { tries: 1 }))],
+  ["negative wrong", json(makeCheckpoint(createRuntime(), { wrong: -1 }))],
+  ["negative elapsed", json(makeCheckpoint(createRuntime(), { elapsedMs: -1 }))],
+  ["invalid phase", json(makeCheckpoint(createRuntime(), { phase: "countdown" }))],
+  ["missing question", json(makeCheckpoint(createRuntime(), { questionId: "" }))],
+  ["unknown question", json(makeCheckpoint(createRuntime(), { questionId: "missing" }))],
+  ["invalid recent wrongs", json(makeCheckpoint(createRuntime(), { recentWrongIds: "bad" }))]
+]) {
+  test(`4단계 P: invalid checkpoint ${name}은 원문을 보존하고 이어하기를 숨긴다`, () => {
+    const seed = createRuntime();
+    const runtime = createRuntime({ [seed.api.STORAGE_KEYS.inProgress]: raw });
+    runtime.api.init();
+    runtime.element("btn-home-time").click();
+    assert.equal(runtime.api.state.timeCheckpoint, null);
+    assert.equal(runtime.raw(seed.api.STORAGE_KEYS.inProgress), raw);
+    assert.equal(runtime.element("btn-time-intro-start").classList.contains("hidden"), false);
+    assert.equal(runtime.element("time-resume-actions").classList.contains("hidden"), true);
+  });
+}
+
+test("4단계 Q: checkpoint setItem throw에도 round·채점·다음 문제·종료가 계속된다", () => {
+  const runtime = createRuntime({}, { throwOnSet: true });
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  assert.doesNotThrow(() => runtime.runInterval(700, 3));
+  assert.equal(runtime.api.state.spinning, true);
+  assert.doesNotThrow(() => runtime.api.stopSpin());
+  const question = runtime.api.state.curQuestion;
+  runtime.element("ans").value = "999999";
+  assert.doesNotThrow(() => runtime.api.evaluateAnswer());
+  assert.equal(runtime.api.state.wrong, 1);
+  assert.doesNotThrow(() => runtime.runTimeout(850));
+  assert.equal(runtime.api.state.spinning, true);
+  runtime.api.state.correct = 15;
+  runtime.api.state.tries = 16;
+  runtime.api.state.wrong = 1;
+  runtime.api.state.curQuestion = question;
+  assert.doesNotThrow(() => runtime.api.finishTimeMode());
+  assert.equal(runtime.element("page-result").classList.contains("active"), true);
+});
+
+test("4단계 O2: checkpoint setItem throw에도 quit은 홈으로 이동한다", () => {
+  const runtime = createRuntime({}, { throwOnSet: true });
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  assert.doesNotThrow(() => runtime.api.handleQuitPlay());
+  assert.equal(runtime.element("page-home").classList.contains("active"), true);
+  assert.equal(runtime.api.state.runEnded, true);
+});
+
+test("4단계 R: 완료 후 다시 도전은 checkpoint 없이 0/15 countdown부터 시작한다", () => {
+  const seed = createRuntime();
+  const checkpoint = makeCheckpoint(seed, { correct: 14, tries: 16, wrong: 2 });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  });
+  runtime.api.init();
+  runtime.api.state.mode = "time";
+  runtime.api.state.correct = 15;
+  runtime.api.state.tries = 17;
+  runtime.api.state.wrong = 2;
+  runtime.api.state.elapsedMs = 45000;
+  runtime.api.finishTimeMode();
+  runtime.api.startTimeMode();
+  assert.equal(runtime.raw(seed.api.STORAGE_KEYS.inProgress), undefined);
+  assert.equal(runtime.api.state.correct, 0);
+  assert.equal(runtime.api.state.tries, 0);
+  assert.equal(runtime.api.state.elapsedMs, 0);
+  assert.equal(runtime.intervalCount(700), 1);
+});
+
+test("4단계 T: resume run 완료도 completion best의 초 우선·동초 tries 우선 규칙을 유지한다", () => {
+  const seed = createRuntime();
+  const question = seed.api.QUESTION_SET[2];
+  const checkpoint = makeCheckpoint(seed, {
+    correct: 14,
+    tries: 17,
+    wrong: 3,
+    elapsedMs: 61000,
+    phase: "answer",
+    questionId: question.id,
+    recentWrongIds: []
+  });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint),
+    [seed.api.STORAGE_KEYS.completionBest]: json({ elapsedSeconds: 61, tries: 20 })
+  });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  runtime.element("ans").value = question.answer;
+  runtime.api.evaluateAnswer();
+  assert.deepEqual(
+    JSON.parse(runtime.raw(seed.api.STORAGE_KEYS.completionBest)),
+    { elapsedSeconds: 61, tries: 18 }
+  );
+});
+
+test("4단계 U: resume 중 오답도 persisted wrongNotes 최신값과 병합한다", () => {
+  const seed = createRuntime();
+  const [existing, current] = seed.api.QUESTION_SET;
+  const checkpoint = makeCheckpoint(seed, {
+    phase: "answer",
+    questionId: current.id,
+    recentWrongIds: []
+  });
+  const runtime = createRuntime({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint),
+    [seed.api.STORAGE_KEYS.wrongs]: json([existing])
+  });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  runtime.element("ans").value = "999999";
+  runtime.api.evaluateAnswer();
+  assert.deepEqual(
+    JSON.parse(runtime.raw(seed.api.STORAGE_KEYS.wrongs)).map(q => q.id),
+    [current.id, existing.id]
+  );
+});
+
+test("4단계 R: practice와 wrong-practice는 실전 체크포인트를 생성하지 않는다", () => {
+  const seed = createRuntime();
+  const question = seed.api.QUESTION_SET[0];
+  const runtime = createRuntime({ [seed.api.STORAGE_KEYS.wrongs]: json([question]) });
+  runtime.api.init();
+  runtime.api.startPracticeMode();
+  assert.equal(runtime.raw(seed.api.STORAGE_KEYS.inProgress), undefined);
+  runtime.api.startWrongPracticeMode();
+  assert.equal(runtime.raw(seed.api.STORAGE_KEYS.inProgress), undefined);
+});
+
+test("5단계 A: 정수와 소수 표현은 숫자값이 같으면 정답이다", () => {
+  for (const input of ["14", "14.0", "14.00", "014", "014.000"]) {
+    assert.equal(runtimeForScoring().api.isAnswerCorrect(input, "14"), true, input);
+  }
+  for (const input of ["14.1", "13.999"]) {
+    assert.equal(runtimeForScoring().api.isAnswerCorrect(input, "14"), false, input);
+  }
+});
+
+test("5단계 B/C: trailing zero와 작은 소수는 숫자값 기준으로 비교한다", () => {
+  const runtime = runtimeForScoring();
+  for (const input of ["0.1", "0.10", "0.100", "00.10"]) {
+    assert.equal(runtime.api.isAnswerCorrect(input, "0.1"), true, input);
+  }
+  for (const input of ["0.01", "0.11", "0.1001"]) {
+    assert.equal(runtime.api.isAnswerCorrect(input, "0.1"), false, input);
+  }
+  for (const input of ["0.01", "0.010", "00.01", "000.0100"]) {
+    assert.equal(runtime.api.isAnswerCorrect(input, "0.01"), true, input);
+  }
+  for (const input of ["0.1", "0.001"]) {
+    assert.equal(runtime.api.isAnswerCorrect(input, "0.01"), false, input);
+  }
+});
+
+test("5단계 D/E: 숫자 형식 밖의 입력과 실제 다른 값은 오답이다", () => {
+  const runtime = runtimeForScoring();
+  for (const input of ["", " ", "abc", "14abc", "1e1", "1E1", "-1", "+1", ".1", "1.", "NaN", "Infinity"]) {
+    assert.equal(runtime.api.isAnswerCorrect(input, "14"), false, input);
+  }
+  assert.equal(runtime.api.isAnswerCorrect("0.1000001", "0.1"), false);
+});
+
+test("5단계 F: canonical answer와 안내·placeholder 문구를 보존한다", () => {
+  const runtime = runtimeForScoring();
+  const question = { examType: "종자검사", stage: "원종", crop: "벼", item: "발아율", answer: "0.10", unit: "%" };
+  assert.equal(runtime.api.isAnswerCorrect("0.1", question.answer), true);
+  assert.match(runtime.api.formatFeedback(question, true), /0\.10%/);
+  assert.equal(runtime.api.getAnswerGuideText(question), "");
+  assert.equal(runtime.api.getAnswerPlaceholder(question), "숫자 입력");
+  assert.doesNotMatch(APP_SOURCE, /소수 첫째 자리까지 입력|소수 둘째 자리까지 입력/);
+  assert.match(fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8"), /play-answer-guide\{visibility:hidden/);
+});
+
+test("5단계 G: 실전모드 14번째 상태에서 14.0에 14를 입력하면 정상 완료한다", () => {
+  const runtime = runtimeForScoring();
+  const question = runtime.api.QUESTION_SET.find(q => q.answer === "14.0");
+  assert.ok(question);
+  runtime.api.init();
+  runtime.api.state.mode = "time";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.api.state.correct = 14;
+  runtime.api.state.tries = 14;
+  runtime.api.state.wrong = 0;
+  runtime.api.state.scored = false;
+  runtime.api.startStopwatch();
+  runtime.element("ans").value = "14";
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.api.state.correct, 15);
+  assert.equal(runtime.api.state.tries, 15);
+  assert.equal(runtime.api.state.runEnded, true);
+  assert.equal(runtime.element("page-result").classList.contains("active"), true);
+});
+
+test("5단계 H: 실전모드에서 실제 다른 숫자는 correct를 늘리지 않고 오답 흐름을 유지한다", () => {
+  const runtime = runtimeForScoring();
+  const question = runtime.api.QUESTION_SET.find(q => q.answer === "14.0");
+  runtime.api.init();
+  runtime.api.state.mode = "time";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.api.state.scored = false;
+  runtime.api.startStopwatch();
+  runtime.element("ans").value = "14.1";
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.api.state.correct, 0);
+  assert.equal(runtime.api.state.wrong, 1);
+  assert.equal(runtime.api.state.tries, 1);
+  assert.equal(runtime.api.state.wrongNotes[0].id, question.id);
+  runtime.runTimeout(850);
+  assert.equal(runtime.api.state.spinning, true);
+});
+
+test("5단계 I/J: practice와 wrong-practice도 동일한 숫자 동등 판정을 사용한다", () => {
+  const question = runtimeForScoring().api.QUESTION_SET.find(q => q.answer === "0.10");
+  const practice = runtimeForScoring();
+  practice.api.init();
+  practice.api.state.mode = "practice";
+  practice.api.state.pool = [question];
+  practice.api.state.curQuestion = question;
+  practice.element("ans").value = "0.1";
+  practice.api.evaluateAnswer();
+  assert.equal(practice.api.state.correct, 1);
+
+  const wrong = runtimeForScoring({ [runtimeForScoring().api.STORAGE_KEYS.wrongs]: json([question]) });
+  wrong.api.init();
+  wrong.api.startWrongPracticeMode();
+  wrong.api.state.curQuestion = question;
+  wrong.api.state.pool = [question];
+  wrong.element("ans").value = "0.1";
+  wrong.api.evaluateAnswer();
+  assert.equal(wrong.api.state.correct, 1);
+});
+
+test("5단계 K: answer phase resume에서도 0.10에 0.1을 한 번만 채점한다", () => {
+  const seed = runtimeForScoring();
+  const question = seed.api.QUESTION_SET.find(q => q.answer === "0.10");
+  const checkpoint = makeCheckpoint(seed, {
+    correct: 0,
+    tries: 0,
+    wrong: 0,
+    phase: "answer",
+    questionId: question.id,
+    recentWrongIds: []
+  });
+  const runtime = runtimeForScoring({
+    [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint)
+  });
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  runtime.element("ans").value = "0.1";
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.api.state.correct, 1);
+  assert.equal(runtime.api.state.tries, 1);
+  assert.equal(runtime.api.state.wrong, 0);
+});
+
+function runtimeForScoring(initialStorage = {}) {
+  return createRuntime(initialStorage);
+}
+
+test("6단계 A: decimal guide는 레이아웃 공간을 차지하지 않고 짧은 화면 보정이 존재한다", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  assert.match(css, /#page-play \.play-answer-guide\{[\s\S]*?display:none !important;[\s\S]*?min-height:0 !important;/);
+  assert.match(css, /@media \(max-width:700px\) and \(max-height:640px\)\{[\s\S]*?--answer-zone-h:280px !important;/);
+  assert.match(css, /@media \(max-width:700px\) and \(max-height:620px\)\{[\s\S]*?--answer-zone-h:260px !important;/);
+});
+
+test("6단계 B: answer phase는 390→800→390 전환에도 문제·입력·점수를 보존하며 입력 정책만 동기화한다", () => {
+  const seed = createRuntime();
+  const question = seed.api.QUESTION_SET[0];
+  const checkpoint = makeCheckpoint(seed, {
+    correct: 7,
+    tries: 9,
+    wrong: 2,
+    phase: "answer",
+    questionId: question.id
+  });
+  const runtime = createRuntime(
+    { [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint) },
+    { viewportWidth: 390 }
+  );
+  runtime.api.init();
+  runtime.api.resumeTimeMode();
+  runtime.element("ans").value = "12.3";
+
+  assert.equal(runtime.element("ans").readOnly, true);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), false);
+  const before = {
+    questionId: runtime.api.state.curQuestion.id,
+    correct: runtime.api.state.correct,
+    tries: runtime.api.state.tries,
+    wrong: runtime.api.state.wrong
+  };
+
+  runtime.resizeTo(800);
+  assert.equal(runtime.element("ans").readOnly, false);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), true);
+  assert.equal(runtime.element("ans").value, "12.3");
+  assert.deepEqual(plain({
+    questionId: runtime.api.state.curQuestion.id,
+    correct: runtime.api.state.correct,
+    tries: runtime.api.state.tries,
+    wrong: runtime.api.state.wrong
+  }), before);
+
+  runtime.resizeTo(390);
+  assert.equal(runtime.element("ans").readOnly, true);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), false);
+  assert.equal(runtime.element("ans").value, "12.3");
+
+  const desktop = createRuntime(
+    { [seed.api.STORAGE_KEYS.inProgress]: json(checkpoint) },
+    { viewportWidth: 800 }
+  );
+  desktop.api.init();
+  desktop.api.resumeTimeMode();
+  assert.equal(desktop.element("ans").readOnly, false);
+  assert.equal(desktop.element("mobile-keypad").classList.contains("hidden"), true);
+});
+
+test("6단계 C: spin phase resize는 현재 문제·점수·룰렛 interval을 바꾸지 않고 STOP을 유지한다", () => {
+  const runtime = createRuntime({}, { viewportWidth: 390 });
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  const before = {
+    questionId: runtime.api.state.curQuestion.id,
+    correct: runtime.api.state.correct,
+    tries: runtime.api.state.tries,
+    wrong: runtime.api.state.wrong,
+    intervals: runtime.intervalCount()
+  };
+
+  runtime.resizeTo(800);
+  runtime.resizeTo(390);
+  assert.equal(runtime.api.state.spinning, true);
+  assert.equal(runtime.element("btn-stop").classList.contains("hidden"), false);
+  assert.deepEqual(plain({
+    questionId: runtime.api.state.curQuestion.id,
+    correct: runtime.api.state.correct,
+    tries: runtime.api.state.tries,
+    wrong: runtime.api.state.wrong,
+    intervals: runtime.intervalCount()
+  }), before);
+  runtime.api.stopSpin();
+  assert.equal(runtime.api.state.runPhase, "answer");
+});
+
+test("6단계 D: feedback phase resize는 채점과 다음-round 예약을 중복하지 않는다", () => {
+  const runtime = createRuntime({}, { viewportWidth: 390 });
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  runtime.api.stopSpin();
+  runtime.element("ans").value = runtime.api.state.curQuestion.answer;
+  runtime.api.evaluateAnswer();
+  const before = {
+    questionId: runtime.api.state.curQuestion.id,
+    correct: runtime.api.state.correct,
+    tries: runtime.api.state.tries,
+    wrong: runtime.api.state.wrong,
+    nextTimeouts: runtime.timeoutCount(850)
+  };
+
+  runtime.resizeTo(800);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), true);
+  assert.equal(runtime.element("btn-submit").classList.contains("hidden"), true);
+  runtime.resizeTo(390);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), false);
+  assert.equal(runtime.element("btn-submit").classList.contains("hidden"), false);
+  assert.deepEqual(plain({
+    questionId: runtime.api.state.curQuestion.id,
+    correct: runtime.api.state.correct,
+    tries: runtime.api.state.tries,
+    wrong: runtime.api.state.wrong,
+    nextTimeouts: runtime.timeoutCount(850)
+  }), before);
+});
+
+test("7단계 A: 네 홈 이미지 버튼의 semantic과 단일 click handler를 보존한다", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  for (const [id, label] of [
+    ["btn-home-time", "실전모드"],
+    ["btn-home-practice", "연습모드"],
+    ["btn-home-wrong", "오답노트"],
+    ["btn-home-settings", "설정"]
+  ]) {
+    assert.match(html, new RegExp(`<button[^>]*id="${id}"[^>]*aria-label="${label}"`));
+    assert.equal((APP_SOURCE.match(new RegExp(`\\$\\("${id}"\\)\\.addEventListener\\("click"`, "g")) || []).length, 1);
+  }
+  assert.match(html, /<div class="home-stage">[\s\S]*id="btn-home-time"[\s\S]*id="btn-home-practice"[\s\S]*id="btn-home-wrong"[\s\S]*id="btn-home-settings"/);
+});
+
+test("7단계 B: 홈은 941:1672 contain stage와 겹치지 않는 동일 좌표계 버튼을 사용한다", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const marker = css.lastIndexOf("/* Stage 7 home coordinate-system stabilization */");
+  assert.ok(marker > css.lastIndexOf("object-fit:cover"));
+  const stageCss = css.slice(marker);
+  assert.match(stageCss, /#page-home \.home-stage\{[\s\S]*?aspect-ratio:941 \/ 1672 !important;/);
+  assert.match(stageCss, /#page-home \.home-bg-image\{[\s\S]*?object-fit:contain !important;/);
+  assert.match(stageCss, /#page-home \.home-btn-large\{[\s\S]*?min-height:0 !important;[\s\S]*?aspect-ratio:797 \/ 225 !important;/);
+  assert.match(stageCss, /#page-home \.home-btn-small\{[\s\S]*?min-height:0 !important;[\s\S]*?aspect-ratio:955 \/ 261 !important;/);
+
+  const rects = [
+    { id: "time", x: .17, y: .6015, w: .66, h: .66 * 941 / 1672 * 225 / 797 },
+    { id: "practice", x: .17, y: .7141, w: .66, h: .66 * 941 / 1672 * 225 / 797 },
+    { id: "wrong", x: .17, y: .8268, w: .31, h: .31 * 941 / 1672 * 261 / 955 },
+    { id: "settings", x: .52, y: .8268, w: .31, h: .31 * 941 / 1672 * 261 / 955 }
+  ];
+  for (let i = 0; i < rects.length; i += 1) {
+    for (let j = i + 1; j < rects.length; j += 1) {
+      const a = rects[i];
+      const b = rects[j];
+      const overlapWidth = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+      const overlapHeight = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+      assert.equal(overlapWidth * overlapHeight, 0, `${a.id}/${b.id}`);
+    }
+  }
 });

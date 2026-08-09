@@ -9,9 +9,12 @@ const STAGE_GROUP_MAP = {
 };
 const EXCLUDED_STAGES = ["채종포 2세대"];
 const COMPLETION_TARGET = 15;
+const TIME_CHECKPOINT_VERSION = 1;
+const TIME_CHECKPOINT_PHASES = ["spin", "answer", "feedback"];
 const STORAGE_KEYS = {
   best: "seedTraining_v1_2_bestTimeAttack",
   completionBest: "seedTraining_v1_2_bestCompletion15",
+  inProgress: "seedTraining_v1_2_inProgressCompletion15",
   wrongs: "seedTraining_v1_2_wrongNotes",
   settings: "seedTraining_v1_2_settings"
 };
@@ -42,6 +45,8 @@ const state = {
   stopwatchStarted: false,
   stopwatchRunning: false,
   stopwatchStartedAt: null,
+  runPhase: "idle",
+  timeCheckpoint: null,
   timeInterval: null,
   nextTimeout: null,
   ngTimeout: null,
@@ -112,6 +117,20 @@ function isValidCompletionBest(value) {
     Number.isInteger(value.elapsedSeconds) && value.elapsedSeconds >= 0 &&
     Number.isInteger(value.tries) && value.tries >= COMPLETION_TARGET;
 }
+function findQuestionById(id) {
+  return QUESTION_SET.find(q => q.id === id && isAllowedQuestion(q)) || null;
+}
+function isValidTimeCheckpoint(value) {
+  if (!isPlainObject(value) || value.version !== TIME_CHECKPOINT_VERSION) return false;
+  if (!Number.isInteger(value.correct) || value.correct < 0 || value.correct >= COMPLETION_TARGET) return false;
+  if (!Number.isInteger(value.tries) || value.tries < value.correct) return false;
+  if (!Number.isInteger(value.wrong) || value.wrong < 0) return false;
+  if (value.tries !== value.correct + value.wrong) return false;
+  if (!Number.isFinite(value.elapsedMs) || value.elapsedMs < 0) return false;
+  if (!TIME_CHECKPOINT_PHASES.includes(value.phase)) return false;
+  if (!isNonEmptyString(value.questionId) || !findQuestionById(value.questionId)) return false;
+  return Array.isArray(value.recentWrongIds) && value.recentWrongIds.every(id => typeof id === "string");
+}
 function readJSON(key) {
   try {
     const raw = localStorage.getItem(key);
@@ -128,6 +147,14 @@ function loadJSON(key, fallback) {
 function saveJSON(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+function removeJSON(key) {
+  try {
+    localStorage.removeItem(key);
     return true;
   } catch (e) {
     return false;
@@ -425,6 +452,58 @@ function isBetterCompletionRecord(candidate, previous) {
   }
   return candidate.tries < previous.tries;
 }
+function loadTimeCheckpoint() {
+  const stored = readJSON(STORAGE_KEYS.inProgress);
+  state.timeCheckpoint = stored.ok && stored.exists && isValidTimeCheckpoint(stored.value)
+    ? stored.value
+    : null;
+  return state.timeCheckpoint;
+}
+function buildTimeCheckpoint(phase = state.runPhase) {
+  const questionId = state.curQuestion?.id || "";
+  const candidate = {
+    version: TIME_CHECKPOINT_VERSION,
+    correct: state.correct,
+    tries: state.tries,
+    wrong: state.wrong,
+    elapsedMs: getElapsedMilliseconds(),
+    phase,
+    questionId,
+    recentWrongIds: state.recentWrongs.map(q => q.id)
+  };
+  return isValidTimeCheckpoint(candidate) ? candidate : null;
+}
+function saveTimeCheckpoint(phase = state.runPhase) {
+  if (state.mode !== "time" || state.runEnded || !state.stopwatchStarted) return false;
+  const checkpoint = buildTimeCheckpoint(phase);
+  if (!checkpoint) return false;
+  state.runPhase = phase;
+  state.timeCheckpoint = checkpoint;
+  return saveJSON(STORAGE_KEYS.inProgress, checkpoint);
+}
+function clearTimeCheckpoint() {
+  state.timeCheckpoint = null;
+  const removed = removeJSON(STORAGE_KEYS.inProgress);
+  if (!removed) {
+    saveJSON(STORAGE_KEYS.inProgress, {
+      version: TIME_CHECKPOINT_VERSION,
+      discarded: true
+    });
+  }
+  return removed;
+}
+function getCheckpointSummary(checkpoint = state.timeCheckpoint) {
+  if (!isValidTimeCheckpoint(checkpoint)) return "";
+  return `정답 ${checkpoint.correct} / ${COMPLETION_TARGET} · 플레이 시간 ${formatTime(Math.floor(checkpoint.elapsedMs / 1000))}`;
+}
+function renderTimeIntro() {
+  const checkpoint = state.timeCheckpoint;
+  const resumable = isValidTimeCheckpoint(checkpoint);
+  show("time-resume-card", resumable);
+  show("btn-time-intro-start", !resumable);
+  show("time-resume-actions", resumable);
+  if (resumable) setText("time-resume-summary", getCheckpointSummary(checkpoint));
+}
 
 function renderPracticeOptions() {
   const examGrid = $("examtype-grid");
@@ -530,6 +609,7 @@ function resetRunCommon() {
   state.stopwatchStarted = false;
   state.stopwatchRunning = false;
   state.stopwatchStartedAt = null;
+  state.runPhase = "idle";
   $("ans").value = "";
   $("ans").className = "ans-input";
   $("ans").placeholder = "숫자 입력";
@@ -556,22 +636,10 @@ function resetSlots() {
   });
 }
 function getAnswerGuideText(q) {
-  if (!q) return "";
-  if (q.item === "발아율") return "정수로 입력";
-  const answer = String(q.answer);
-  const decimals = answer.includes(".") ? answer.split(".")[1].length : 0;
-  if (decimals === 1) return "소수 첫째 자리까지 입력";
-  if (decimals === 2) return "소수 둘째 자리까지 입력";
-  return "숫자로 입력";
+  return "";
 }
 
 function getAnswerPlaceholder(q) {
-  if (!q) return "숫자 입력";
-  const answer = String(q.answer);
-  const decimals = answer.includes(".") ? answer.split(".")[1].length : 0;
-  if (decimals === 0) return "예) 0";
-  if (decimals === 1) return "예) 0.0";
-  if (decimals === 2) return "예) 0.00";
   return "숫자 입력";
 }
 
@@ -591,16 +659,66 @@ function formatQuestionHTML(q) {
 function startTimeMode() {
   prepareAudio();
   closeModal("time-intro");
+  clearTimeCheckpoint();
   state.mode = "time";
   state.pool = QUESTION_SET.filter(isAllowedQuestion);
   resetRunCommon();
   updatePlayHeader();
   showPage("play");
+  state.runPhase = "countdown";
   startCountdown(3, "실전모드 시작", () => {
     maybeBeep("start");
     startStopwatch();
     startRound();
   });
+}
+
+function resumeTimeMode() {
+  const checkpoint = state.timeCheckpoint;
+  if (!isValidTimeCheckpoint(checkpoint)) {
+    renderTimeIntro();
+    return;
+  }
+  const question = findQuestionById(checkpoint.questionId);
+  if (!question) {
+    state.timeCheckpoint = null;
+    renderTimeIntro();
+    return;
+  }
+  prepareAudio();
+  closeModal("time-intro");
+  state.mode = "time";
+  state.pool = QUESTION_SET.filter(isAllowedQuestion);
+  resetRunCommon();
+  state.correct = checkpoint.correct;
+  state.tries = checkpoint.tries;
+  state.wrong = checkpoint.wrong;
+  state.elapsedMs = checkpoint.elapsedMs;
+  state.recentWrongs = checkpoint.recentWrongIds.map(findQuestionById).filter(Boolean);
+  state.curQuestion = question;
+  state.runPhase = checkpoint.phase;
+  updatePlayHeader();
+  showPage("play");
+  startStopwatch(checkpoint.elapsedMs);
+  if (checkpoint.phase === "spin") {
+    startRound(question);
+  } else if (checkpoint.phase === "answer") {
+    showCurrentQuestionForAnswer();
+    saveTimeCheckpoint("answer");
+  } else {
+    startRound();
+  }
+}
+
+function startNewTimeModeFromCheckpoint() {
+  const checkpoint = state.timeCheckpoint;
+  if (!isValidTimeCheckpoint(checkpoint)) {
+    startTimeMode();
+    return;
+  }
+  const summary = `${checkpoint.correct}/${COMPLETION_TARGET} · ${formatTime(Math.floor(checkpoint.elapsedMs / 1000))}`;
+  if (!confirm(`진행 중인 기록(${summary})을 삭제하고 새로 시작할까요?`)) return;
+  startTimeMode();
 }
 
 function startPracticeMode() {
@@ -760,8 +878,8 @@ function pauseStopwatch() {
   updateStatus();
 }
 
-function startStopwatch() {
-  state.elapsedMs = 0;
+function startStopwatch(initialElapsedMs = 0) {
+  state.elapsedMs = Number.isFinite(initialElapsedMs) && initialElapsedMs >= 0 ? initialElapsedMs : 0;
   state.completionElapsedSeconds = null;
   state.stopwatchStarted = true;
   state.stopwatchRunning = false;
@@ -785,7 +903,10 @@ function freezeStopwatch() {
 
 function handleVisibilityChange() {
   if (state.mode !== "time" || state.runEnded || !state.stopwatchStarted) return;
-  if (document.hidden) pauseStopwatch();
+  if (document.hidden) {
+    pauseStopwatch();
+    saveTimeCheckpoint();
+  }
   else resumeStopwatch();
 }
 
@@ -852,16 +973,46 @@ function setMobileControlsActive(active, mode = "submit") {
   }
 }
 
+function syncPlayControlsForViewport() {
+  const pagePlay = $("page-play");
+  if (!pagePlay?.classList.contains("active") || state.runEnded || !state.curQuestion) return;
+  const mobile = isMobileView();
+
+  if (state.spinning || state.runPhase === "spin") {
+    setMobileControlsActive(true, "stop");
+    show("input-row", false);
+    show("mobile-keypad", false);
+    show("btn-submit", false);
+    show("btn-stop", true);
+    return;
+  }
+
+  if (!state.scored) {
+    setMobileControlsActive(true, "submit");
+    show("input-row", true);
+    show("mobile-keypad", mobile);
+    show("btn-submit", true);
+    show("btn-stop", false);
+    return;
+  }
+
+  setMobileControlsActive(false, "submit");
+  show("input-row", false);
+  show("mobile-keypad", mobile);
+  show("btn-submit", mobile);
+  show("btn-stop", false);
+}
+
 function formatFeedback(q, isCorrect) {
   const word = isCorrect ? "정답!" : "오답!";
   const criteria = `${q.item} ${q.stage} ${q.answer}${q.unit || ""}`;
   return `<span class="result-word">${word}</span><span class="criteria">${escapeHTML(criteria)}</span>`;
 }
 
-function startRound() {
+function startRound(restoredQuestion = null) {
   if (state.runEnded) return;
   state.scored = false;
-  state.curQuestion = pickQuestion();
+  state.curQuestion = restoredQuestion || pickQuestion();
   if (!state.curQuestion) return;
   setText("play-examtype-chip", state.curQuestion.examType);
   $("play-examtype-chip").classList.add("spinning");
@@ -870,16 +1021,12 @@ function startRound() {
   $("ans").className = "ans-input";
   $("ans").placeholder = "숫자 입력";
   setText("answer-guide", "");
-  setMobileControlsActive(true, "stop");
-  if (!isMobileView()) {
-    show("input-row", false);
-    show("mobile-keypad", false);
-    show("btn-submit", false);
-    show("btn-stop", true);
-  }
   setFeedback("", "");
   setQuestionText("슬롯이 돌아가는 중...");
+  state.runPhase = "spin";
+  syncPlayControlsForViewport();
   startSpinVisual(state.curQuestion);
+  saveTimeCheckpoint("spin");
 }
 
 function startSpinVisual(targetQ) {
@@ -920,7 +1067,16 @@ function stopSpin() {
   state.scored = false;
   state.spinIntervals.forEach(iv => clearInterval(iv));
   state.spinIntervals = [];
+  state.runPhase = "answer";
+  showCurrentQuestionForAnswer();
+  saveTimeCheckpoint("answer");
+}
+
+function showCurrentQuestionForAnswer() {
   const q = state.curQuestion;
+  if (!q) return;
+  state.spinning = false;
+  state.scored = false;
   setText("play-examtype-chip", q.examType);
   $("play-examtype-chip").classList.remove("spinning");
   setText("shell-hint", "");
@@ -935,12 +1091,8 @@ function stopSpin() {
   setQuestionText(formatQuestionHTML(q));
   setText("answer-guide", getAnswerGuideText(q));
   $("ans").placeholder = getAnswerPlaceholder(q);
-  show("btn-stop", false);
-  show("input-row", true);
-  show("mobile-keypad", isMobileView());
-  show("btn-submit", true);
   $("unit-tag").textContent = q.unit || "%";
-  setMobileControlsActive(true, "submit");
+  syncPlayControlsForViewport();
   if (isMobileView()) $("ans").blur();
   else $("ans").focus();
 }
@@ -974,17 +1126,14 @@ function isValidAnswerFormat(raw) {
   return /^\d+(?:\.\d+)?$/.test(raw);
 }
 
-function getDecimalPlaces(value) {
-  const text = String(value).trim();
-  if (!text.includes(".")) return 0;
-  return text.split(".")[1].length;
-}
 function isAnswerCorrect(raw, correctText) {
-  const userNum = Number(raw);
-  const correctNum = Number(correctText);
-  if (!Number.isFinite(userNum) || !Number.isFinite(correctNum)) return false;
-  if (Math.abs(userNum - correctNum) >= 1e-9) return false;
-  return getDecimalPlaces(raw) === getDecimalPlaces(correctText);
+  const input = String(raw).trim();
+  const answer = String(correctText).trim();
+  if (!isValidAnswerFormat(input) || !isValidAnswerFormat(answer)) return false;
+  const inputNumber = Number(input);
+  const answerNumber = Number(answer);
+  if (!Number.isFinite(inputNumber) || !Number.isFinite(answerNumber)) return false;
+  return inputNumber === answerNumber;
 }
 
 function handleKeypadInput(key) {
@@ -1042,16 +1191,12 @@ function evaluateAnswer() {
     finishTimeMode();
     return;
   }
-  if (isMobileView()) {
-    setMobileControlsActive(false, "submit");
-    $("answer-zone")?.classList.add("result-feedback");
-    show("input-row", false);
-    show("btn-submit", true);
-  } else {
-    show("btn-submit", false);
-    show("mobile-keypad", false);
-    show("input-row", false);
+  if (state.mode === "time") {
+    state.runPhase = "feedback";
+    saveTimeCheckpoint("feedback");
   }
+  $("answer-zone")?.classList.add("result-feedback");
+  syncPlayControlsForViewport();
   clearTimeout(state.nextTimeout);
   state.nextTimeout = setTimeout(() => {
     if (state.runEnded) return;
@@ -1111,6 +1256,7 @@ function finishTimeMode() {
     state.bestCompletion15 = candidate;
     saveCompletionBest();
   }
+  clearTimeCheckpoint();
   $("new-badge").classList.toggle("hidden", !isNew);
   setText("r-correct", formatTime(state.completionElapsedSeconds));
   const best = state.bestCompletion15;
@@ -1223,13 +1369,25 @@ function clearWrongNotes() {
 }
 
 function handleQuitPlay() {
-  if (!confirm("진행 중인 플레이를 종료하고 홈으로 갈까요?")) return;
+  if (state.mode === "time" && !state.runEnded && state.stopwatchStarted) {
+    if (!confirm("현재 기록을 저장하고 홈으로 갈까요?\n다음에 이어서 할 수 있어요.")) return;
+    pauseStopwatch();
+    saveTimeCheckpoint();
+  } else if (!confirm("진행 중인 플레이를 종료하고 홈으로 갈까요?")) {
+    return;
+  }
   state.runEnded = true;
   state.stopwatchStarted = false;
   state.stopwatchRunning = false;
   state.stopwatchStartedAt = null;
   clearRunHandles();
   showPage("home");
+}
+
+function handlePageHide() {
+  if (state.mode !== "time" || state.runEnded || !state.stopwatchStarted) return;
+  pauseStopwatch();
+  saveTimeCheckpoint();
 }
 
 function renderSlotValue(el, text, kind = "text") {
@@ -1293,13 +1451,15 @@ function bindEvents() {
   $("page-home").addEventListener("touchstart", homeInteract, { passive: true });
   $("page-home").addEventListener("click", homeInteract, { passive: true });
 
-  $("btn-home-time").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); openModal("time-intro"); });
+  $("btn-home-time").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); renderTimeIntro(); openModal("time-intro"); });
   $("btn-home-practice").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup"); });
   $("btn-home-wrong").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); renderWrongPage(); openModal("wrong"); });
   $("btn-home-settings").addEventListener("click", () => { ensureHomeBgm(); maybeBeep("button"); openModal("settings"); });
 
   $("btn-time-intro-close").addEventListener("click", () => { maybeBeep("button"); closeModal("time-intro"); });
   $("btn-time-intro-start").addEventListener("click", () => { maybeBeep("button"); startTimeMode(); });
+  $("btn-time-resume").addEventListener("click", () => { maybeBeep("button"); resumeTimeMode(); });
+  $("btn-time-new").addEventListener("click", () => { maybeBeep("button"); startNewTimeModeFromCheckpoint(); });
 
   $("btn-practice-close").addEventListener("click", () => { maybeBeep("button"); closeModal("practice-setup"); });
   $("btn-practice-start").addEventListener("click", () => { maybeBeep("button"); startPracticeMode(); });
@@ -1353,6 +1513,8 @@ function bindEvents() {
     if (e.target.matches(".exam-check, .stage-check, .crop-check")) validatePracticeSelection();
   });
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("resize", syncPlayControlsForViewport);
+  window.addEventListener("pagehide", handlePageHide);
 
   document.querySelectorAll(".modal-layer").forEach(layer => {
     layer.addEventListener("click", (e) => {
@@ -1366,6 +1528,7 @@ function init() {
   loadWrongNotes();
   loadBestRecord();
   loadCompletionBest();
+  loadTimeCheckpoint();
   initHomeAssets();
   preventImageLongPress();
   renderPracticeOptions();
