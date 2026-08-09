@@ -1428,12 +1428,12 @@ body #page-play .mode-sub{
 #page-play .pbar-track.time-mode .pbar-fill,
 body #page-play.mode-time #pbar{
   position:absolute !important;
-  right:0 !important;
-  left:auto !important;
+  right:auto !important;
+  left:0 !important;
   top:0 !important;
   bottom:0 !important;
   height:100% !important;
-  transform-origin:right center !important;
+  transform-origin:left center !important;
   background:linear-gradient(90deg,#62e091 0%,#ffdd81 58%,#ff884f 100%) !important;
   border:0 !important;
   box-shadow:0 0 12px rgba(255,174,77,.16) !important;
@@ -1639,4 +1639,3 @@ body #page-play .answer-zone .mobile-keypad .keypad-btn.control,
     gap:3px !important;
   }
 }
-

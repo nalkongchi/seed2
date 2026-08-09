@@ -8,13 +8,15 @@ const STAGE_GROUP_MAP = {
   "보급종": ["보급종", "보급종포", "채종포 1세대"]
 };
 const EXCLUDED_STAGES = ["채종포 2세대"];
+const COMPLETION_TARGET = 15;
 const STORAGE_KEYS = {
   best: "seedTraining_v1_2_bestTimeAttack",
+  completionBest: "seedTraining_v1_2_bestCompletion15",
   wrongs: "seedTraining_v1_2_wrongNotes",
   settings: "seedTraining_v1_2_settings"
 };
 const MODE_META = {
-  time: { en: "Time Attack", title: "실전모드", pill: "⚡ 1분 타임어택", sub: "전체 범위 랜덤 · 1분 제한" },
+  time: { en: "Time Attack", title: "실전모드", pill: "⚡ 15정답 완주", sub: "전체 범위 랜덤 · 정답 15개" },
   practice: { en: "Practice", title: "연습모드", pill: "∞ 무한모드" },
   "wrong-practice": { en: "Wrong Notes", title: "오답 연습", pill: "📝 오답만", sub: "오답노트에 저장된 문제만 출제" }
 };
@@ -33,8 +35,13 @@ const state = {
   tries: 0,
   recentWrongs: [],
   wrongNotes: [],
+  preservedWrongNotes: [],
   settings: { bgmLevel: 3, sfx: true, vibrate: true },
-  timeLeft: 60,
+  elapsedMs: 0,
+  completionElapsedSeconds: null,
+  stopwatchStarted: false,
+  stopwatchRunning: false,
+  stopwatchStartedAt: null,
   timeInterval: null,
   nextTimeout: null,
   ngTimeout: null,
@@ -43,6 +50,7 @@ const state = {
   countdownTimer: null,
   audioCtx: null,
   timeAttackBest: { correct: 0, tries: 0, acc: 0 },
+  bestCompletion15: null,
   audioReady: false,
   currentBgm: null
 };
@@ -75,16 +83,55 @@ function show(id, visible) {
   el.classList.toggle("hidden", !visible);
 }
 function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
-function loadJSON(key, fallback) {
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim() !== "";
+}
+function isStoredQuestion(value) {
+  return isPlainObject(value) &&
+    isNonEmptyString(value.id) &&
+    isNonEmptyString(value.examType) &&
+    isNonEmptyString(value.crop) &&
+    isNonEmptyString(value.stage) &&
+    isNonEmptyString(value.item) &&
+    isNonEmptyString(value.answer) &&
+    /^\d+(?:\.\d+)?$/.test(value.answer) &&
+    (typeof value.unit === "undefined" || typeof value.unit === "string") &&
+    (typeof value.label === "undefined" || typeof value.label === "string");
+}
+function isValidBestRecord(value) {
+  return isPlainObject(value) &&
+    Number.isInteger(value.correct) && value.correct >= 0 &&
+    Number.isInteger(value.tries) && value.tries >= value.correct &&
+    Number.isInteger(value.acc) && value.acc >= 0 && value.acc <= 100;
+}
+function isValidCompletionBest(value) {
+  return isPlainObject(value) &&
+    Number.isInteger(value.elapsedSeconds) && value.elapsedSeconds >= 0 &&
+    Number.isInteger(value.tries) && value.tries >= COMPLETION_TARGET;
+}
+function readJSON(key) {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    if (raw === null) return { ok: true, exists: false, value: undefined };
+    return { ok: true, exists: true, value: JSON.parse(raw) };
   } catch (e) {
-    return fallback;
+    return { ok: false, exists: false, value: undefined };
   }
 }
+function loadJSON(key, fallback) {
+  const stored = readJSON(key);
+  return stored.ok && stored.exists ? stored.value : fallback;
+}
 function saveJSON(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 
@@ -224,10 +271,18 @@ function playEffect(id, fallbackType = "") {
 }
 function normalizeSettings(raw) {
   const base = { bgmLevel: 3, sfx: true, vibrate: true };
-  const out = Object.assign(base, raw || {});
-  if (typeof out.bgmLevel === "undefined") out.bgmLevel = out.bgm === false ? 0 : 3;
-  out.bgmLevel = Math.max(0, Math.min(5, Number(out.bgmLevel ?? 3)));
-  return out;
+  const source = isPlainObject(raw) ? raw : {};
+  const hasOwnBgmLevel = Object.prototype.hasOwnProperty.call(source, "bgmLevel");
+  const hasValidBgmLevel = hasOwnBgmLevel &&
+    Number.isInteger(source.bgmLevel) && source.bgmLevel >= 0 && source.bgmLevel <= 5;
+  let bgmLevel = base.bgmLevel;
+  if (hasValidBgmLevel) bgmLevel = source.bgmLevel;
+  else if (!hasOwnBgmLevel && source.bgm === false) bgmLevel = 0;
+  return {
+    bgmLevel,
+    sfx: typeof source.sfx === "boolean" ? source.sfx : base.sfx,
+    vibrate: typeof source.vibrate === "boolean" ? source.vibrate : base.vibrate
+  };
 }
 function updateBgmVolumeUI() {
   const el = $("bgm-volume-level");
@@ -243,10 +298,17 @@ function adjustBgmLevel(delta) {
   else syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home");
 }
 function loadSettings() {
-  state.settings = normalizeSettings(loadJSON(STORAGE_KEYS.settings, { bgmLevel: 3, sfx: true, vibrate: true }));
+  const fallback = { bgmLevel: 3, sfx: true, vibrate: true };
+  const stored = readJSON(STORAGE_KEYS.settings);
+  const raw = stored.ok && stored.exists ? stored.value : fallback;
+  const shouldMigrateLegacyBgm = stored.ok && stored.exists && isPlainObject(raw) &&
+    !Object.prototype.hasOwnProperty.call(raw, "bgmLevel") &&
+    (raw.bgm === false || raw.bgm === true);
+  state.settings = normalizeSettings(raw);
   updateBgmVolumeUI();
   $("toggle-sfx").checked = !!state.settings.sfx;
   $("toggle-vibrate").checked = !!state.settings.vibrate;
+  if (shouldMigrateLegacyBgm) saveJSON(STORAGE_KEYS.settings, state.settings);
 }
 function saveSettings() {
   state.settings.sfx = $("toggle-sfx").checked;
@@ -260,46 +322,108 @@ function saveSettings() {
   maybeBeep("button");
 }
 
-function loadWrongNotes() {
-  const loaded = loadJSON(STORAGE_KEYS.wrongs, []);
-  let migrated = false;
-  const seen = new Set();
+const CANONICAL_QUESTION_FIELDS = ["id", "examType", "stage", "crop", "item", "answer", "unit", "label"];
 
-  state.wrongNotes = loaded.flatMap(q => {
-    if (!q) return [];
-    const crop = q.crop === "트리티케일(사료용)" ? "라이밀(트리티케일)" : q.crop;
-    const item = q.item === "피해출현율" ? "메벼출현율" : q.item;
-    const current = QUESTION_SET.find(candidate =>
-      candidate.examType === q.examType &&
-      candidate.stage === q.stage &&
-      candidate.crop === crop &&
-      candidate.item === item
-    );
-    const normalized = current || { ...q, crop, item };
-    if (!isAllowedQuestion(normalized) || seen.has(normalized.id)) {
-      migrated = true;
-      return [];
+function hasQuestionTuple(q) {
+  return isPlainObject(q) &&
+    isNonEmptyString(q.examType) &&
+    isNonEmptyString(q.stage) &&
+    isNonEmptyString(q.crop) &&
+    isNonEmptyString(q.item);
+}
+
+function findCanonicalQuestion(q) {
+  if (!hasQuestionTuple(q)) return null;
+  const crop = q.crop === "트리티케일(사료용)" ? "라이밀(트리티케일)" : q.crop;
+  const item = q.item === "피해출현율" ? "메벼출현율" : q.item;
+  return QUESTION_SET.find(candidate =>
+    candidate.examType === q.examType &&
+    candidate.stage === q.stage &&
+    candidate.crop === crop &&
+    candidate.item === item
+  ) || null;
+}
+
+function normalizeWrongNoteRecords(loaded) {
+  let migrated = false;
+  let hasMalformedItems = false;
+  const seen = new Set();
+  const active = [];
+  const preserved = [];
+  const records = [];
+
+  loaded.forEach(q => {
+    if (!hasQuestionTuple(q)) {
+      hasMalformedItems = true;
+      preserved.push(q);
+      records.push(q);
+      return;
     }
-    seen.add(normalized.id);
-    if (
-      normalized.id !== q.id ||
-      normalized.crop !== q.crop ||
-      normalized.item !== q.item ||
-      normalized.answer !== q.answer
-    ) migrated = true;
-    return [normalized];
+    const current = findCanonicalQuestion(q);
+    if (!current || !isAllowedQuestion(current)) {
+      if (!isStoredQuestion(q)) hasMalformedItems = true;
+      preserved.push(q);
+      records.push(q);
+      return;
+    }
+    if (!isStoredQuestion(q)) hasMalformedItems = true;
+    if (seen.has(current.id)) {
+      migrated = true;
+      return;
+    }
+    seen.add(current.id);
+    active.push(current);
+    records.push(current);
+    if (CANONICAL_QUESTION_FIELDS.some(field => current[field] !== q[field])) migrated = true;
   });
 
-  if (migrated) saveWrongNotes();
+  return { active, preserved, records, migrated, hasMalformedItems };
 }
-function saveWrongNotes() {
-  saveJSON(STORAGE_KEYS.wrongs, state.wrongNotes);
+
+function applyWrongNoteSnapshot(snapshot) {
+  state.wrongNotes = snapshot.active;
+  state.preservedWrongNotes = snapshot.preserved;
+}
+
+function loadWrongNotes() {
+  const stored = readJSON(STORAGE_KEYS.wrongs);
+  if (!stored.ok || !stored.exists || !Array.isArray(stored.value)) {
+    state.wrongNotes = [];
+    state.preservedWrongNotes = [];
+    return;
+  }
+  const snapshot = normalizeWrongNoteRecords(stored.value);
+  applyWrongNoteSnapshot(snapshot);
+
+  if (snapshot.migrated && !snapshot.hasMalformedItems) saveWrongNotes(snapshot.records);
+}
+function saveWrongNotes(records = state.wrongNotes) {
+  return saveJSON(STORAGE_KEYS.wrongs, records);
 }
 function loadBestRecord() {
-  state.timeAttackBest = loadJSON(STORAGE_KEYS.best, { correct: 0, tries: 0, acc: 0 });
+  const fallback = { correct: 0, tries: 0, acc: 0 };
+  const loaded = loadJSON(STORAGE_KEYS.best, fallback);
+  state.timeAttackBest = isValidBestRecord(loaded) ? loaded : fallback;
 }
 function saveBestRecord() {
   saveJSON(STORAGE_KEYS.best, state.timeAttackBest);
+}
+function loadCompletionBest() {
+  const stored = readJSON(STORAGE_KEYS.completionBest);
+  state.bestCompletion15 = stored.ok && stored.exists && isValidCompletionBest(stored.value)
+    ? stored.value
+    : null;
+}
+function saveCompletionBest() {
+  return saveJSON(STORAGE_KEYS.completionBest, state.bestCompletion15);
+}
+function isBetterCompletionRecord(candidate, previous) {
+  if (!isValidCompletionBest(candidate)) return false;
+  if (!isValidCompletionBest(previous)) return true;
+  if (candidate.elapsedSeconds !== previous.elapsedSeconds) {
+    return candidate.elapsedSeconds < previous.elapsedSeconds;
+  }
+  return candidate.tries < previous.tries;
 }
 
 function renderPracticeOptions() {
@@ -375,26 +499,37 @@ function filterQuestions(examTypes, stageGroups, crops) {
   );
 }
 
-function resetRunCommon() {
+function clearRunHandles() {
   clearInterval(state.timeInterval);
   clearTimeout(state.nextTimeout);
   clearTimeout(state.ngTimeout);
   clearInterval(state.countdownTimer);
+  state.spinIntervals.forEach(iv => clearInterval(iv));
   state.timeInterval = null;
   state.nextTimeout = null;
   state.ngTimeout = null;
   state.countdownTimer = null;
+  state.spinIntervals = [];
+  state.spinning = false;
+  const overlay = $("countdown-overlay");
+  if (overlay) overlay.classList.remove("active");
+}
+
+function resetRunCommon() {
+  clearRunHandles();
   state.curQuestion = null;
   state.spinning = false;
   state.scored = false;
-  state.spinIntervals.forEach(iv => clearInterval(iv));
-  state.spinIntervals = [];
   state.correct = 0;
   state.wrong = 0;
   state.tries = 0;
   state.recentWrongs = [];
   state.runEnded = false;
-  state.timeLeft = 60;
+  state.elapsedMs = 0;
+  state.completionElapsedSeconds = null;
+  state.stopwatchStarted = false;
+  state.stopwatchRunning = false;
+  state.stopwatchStartedAt = null;
   $("ans").value = "";
   $("ans").className = "ans-input";
   $("ans").placeholder = "숫자 입력";
@@ -463,7 +598,7 @@ function startTimeMode() {
   showPage("play");
   startCountdown(3, "실전모드 시작", () => {
     maybeBeep("start");
-    startTimeAttackTimer();
+    startStopwatch();
     startRound();
   });
 }
@@ -538,20 +673,19 @@ function updateStatus() {
   const pbarTrack = pbar?.parentElement;
   if (pbarTrack) pbarTrack.classList.toggle("time-mode", state.mode === "time");
   if (state.mode === "time") {
-    setText("status-1-lbl", "남은 시간");
-    setText("status-1-val", formatTime(state.timeLeft));
-    setText("status-2-lbl", "정답 수");
-    setText("status-2-val", String(state.correct));
-    const remainPct = Math.max(0, Math.min(100, (state.timeLeft / 60) * 100));
-    // v1.2-25: 실전모드 시간바는 오른쪽에 남은 시간이 붙고 왼쪽부터 비워지게 한다.
+    setText("status-1-lbl", "경과 시간");
+    setText("status-1-val", formatTime(getElapsedSeconds()));
+    setText("status-2-lbl", "진행도");
+    setText("status-2-val", `${state.correct} / ${COMPLETION_TARGET}`);
+    const progressPct = Math.max(0, Math.min(100, (state.correct / COMPLETION_TARGET) * 100));
     pbar.style.position = "absolute";
-    pbar.style.right = "0";
-    pbar.style.left = "auto";
+    pbar.style.right = "auto";
+    pbar.style.left = "0";
     pbar.style.top = "0";
     pbar.style.bottom = "0";
-    pbar.style.width = `${remainPct}%`;
+    pbar.style.width = `${progressPct}%`;
     pbar.style.marginLeft = "0";
-    pbar.style.transformOrigin = "right center";
+    pbar.style.transformOrigin = "left center";
   } else {
     setText("status-1-lbl", "맞힘 수");
     setText("status-1-val", String(state.correct));
@@ -589,18 +723,70 @@ function startCountdown(sec, label, onDone) {
   }, 700);
 }
 
-function startTimeAttackTimer() {
-  state.timeLeft = 60;
+function getClockNow() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
+
+function getElapsedMilliseconds(at = getClockNow()) {
+  const activeMs = state.stopwatchRunning && state.stopwatchStartedAt !== null
+    ? Math.max(0, at - state.stopwatchStartedAt)
+    : 0;
+  return Math.max(0, state.elapsedMs + activeMs);
+}
+
+function getElapsedSeconds() {
+  if (state.completionElapsedSeconds !== null) return state.completionElapsedSeconds;
+  return Math.floor(getElapsedMilliseconds() / 1000);
+}
+
+function resumeStopwatch() {
+  if (!state.stopwatchStarted || state.stopwatchRunning || state.runEnded || document.hidden) return;
+  state.stopwatchStartedAt = getClockNow();
+  state.stopwatchRunning = true;
+  clearInterval(state.timeInterval);
+  state.timeInterval = setInterval(updateStatus, 250);
+}
+
+function pauseStopwatch() {
+  if (!state.stopwatchRunning || state.stopwatchStartedAt === null) return;
+  state.elapsedMs = getElapsedMilliseconds();
+  state.stopwatchStartedAt = null;
+  state.stopwatchRunning = false;
+  clearInterval(state.timeInterval);
+  state.timeInterval = null;
   updateStatus();
-  state.timeInterval = setInterval(() => {
-    state.timeLeft -= 1;
-    updateStatus();
-    if (state.timeLeft <= 0) {
-      state.timeLeft = 0;
-      clearInterval(state.timeInterval);
-      finishTimeMode();
-    }
-  }, 1000);
+}
+
+function startStopwatch() {
+  state.elapsedMs = 0;
+  state.completionElapsedSeconds = null;
+  state.stopwatchStarted = true;
+  state.stopwatchRunning = false;
+  state.stopwatchStartedAt = null;
+  resumeStopwatch();
+  updateStatus();
+}
+
+function freezeStopwatch() {
+  if (state.stopwatchRunning && state.stopwatchStartedAt !== null) {
+    state.elapsedMs = getElapsedMilliseconds();
+  }
+  state.stopwatchStartedAt = null;
+  state.stopwatchRunning = false;
+  state.stopwatchStarted = false;
+  clearInterval(state.timeInterval);
+  state.timeInterval = null;
+  state.completionElapsedSeconds = Math.floor(Math.max(0, state.elapsedMs) / 1000);
+  return state.completionElapsedSeconds;
+}
+
+function handleVisibilityChange() {
+  if (state.mode !== "time" || state.runEnded || !state.stopwatchStarted) return;
+  if (document.hidden) pauseStopwatch();
+  else resumeStopwatch();
 }
 
 function getStageWeight(stage) {
@@ -830,10 +1016,16 @@ function evaluateAnswer() {
   const isCorrect = isAnswerCorrect(raw, correctText);
   state.scored = true;
   state.tries += 1;
+  let completedTimeMode = false;
   if (isCorrect) {
     state.correct += 1;
+    completedTimeMode = state.mode === "time" && state.correct >= COMPLETION_TARGET;
+    if (completedTimeMode) freezeStopwatch();
     $("ans").classList.add("ok");
-    setFeedback(formatFeedback(state.curQuestion, true), "ok");
+    setFeedback(
+      completedTimeMode ? "🎉 15개 정답 달성!" : formatFeedback(state.curQuestion, true),
+      "ok"
+    );
     playEffect("se-correct", "correct");
     maybeVibrate([40]);
   } else {
@@ -846,6 +1038,10 @@ function evaluateAnswer() {
     state.recentWrongs.push(state.curQuestion);
   }
   updateStatus();
+  if (completedTimeMode) {
+    finishTimeMode();
+    return;
+  }
   if (isMobileView()) {
     setMobileControlsActive(false, "submit");
     $("answer-zone")?.classList.add("result-feedback");
@@ -867,36 +1063,59 @@ function evaluateAnswer() {
 
 function pushWrongNote(q) {
   if (!isAllowedQuestion(q)) return;
-  const exists = state.wrongNotes.some(item => item.id === q.id);
-  if (!exists) {
-    state.wrongNotes.unshift(q);
-    saveWrongNotes();
+  const canonical = QUESTION_SET.find(candidate => candidate.id === q.id) || findCanonicalQuestion(q);
+  if (!canonical || !isAllowedQuestion(canonical)) return;
+
+  const stored = readJSON(STORAGE_KEYS.wrongs);
+  if (!stored.ok || (stored.exists && !Array.isArray(stored.value))) {
+    if (!state.wrongNotes.some(item => item.id === canonical.id)) {
+      state.wrongNotes.unshift(canonical);
+    }
+    return;
   }
+
+  const snapshot = normalizeWrongNoteRecords(stored.exists ? stored.value : []);
+  const alreadyPersisted = snapshot.active.some(item => item.id === canonical.id);
+  if (alreadyPersisted) {
+    applyWrongNoteSnapshot(snapshot);
+    if (snapshot.migrated && !snapshot.hasMalformedItems) saveWrongNotes(snapshot.records);
+    return;
+  }
+
+  const mergedRecords = [canonical, ...snapshot.records];
+  const merged = normalizeWrongNoteRecords(mergedRecords);
+  applyWrongNoteSnapshot(merged);
+  saveWrongNotes(merged.records);
 }
 
 function finishTimeMode() {
+  if (state.runEnded) return;
+  if (state.completionElapsedSeconds === null) freezeStopwatch();
   state.runEnded = true;
-  clearInterval(state.timeInterval);
-  clearTimeout(state.nextTimeout);
-  clearTimeout(state.ngTimeout);
+  clearRunHandles();
   show("btn-stop", false);
   show("btn-submit", false);
   show("mobile-keypad", false);
   show("input-row", false);
-  setFeedback("⏰ 시간이 종료되었습니다.", "");
+  setFeedback("🎉 15개 정답 달성!", "ok");
   stopAllBgm();
   playEffect("se-finish", "start");
   maybeVibrate([80, 60, 120]);
-  const acc = state.tries ? Math.round(state.correct / state.tries * 100) : 0;
-  const prev = state.timeAttackBest;
-  const isNew = state.correct > (prev.correct || 0) || (state.correct === (prev.correct || 0) && acc > (prev.acc || 0));
+  const acc = state.tries ? Math.round((COMPLETION_TARGET / state.tries) * 100) : 0;
+  const candidate = {
+    elapsedSeconds: state.completionElapsedSeconds,
+    tries: state.tries
+  };
+  const isNew = isBetterCompletionRecord(candidate, state.bestCompletion15);
   if (isNew) {
-    state.timeAttackBest = { correct: state.correct, tries: state.tries, acc };
-    saveBestRecord();
+    state.bestCompletion15 = candidate;
+    saveCompletionBest();
   }
   $("new-badge").classList.toggle("hidden", !isNew);
-  setText("r-correct", `${state.correct}개`);
-  $("r-best").innerHTML = `<span class="best-num">${state.timeAttackBest.correct || 0}</span>개`;
+  setText("r-correct", formatTime(state.completionElapsedSeconds));
+  const best = state.bestCompletion15;
+  const bestAcc = best ? Math.round((COMPLETION_TARGET / best.tries) * 100) : 0;
+  setText("r-best", best ? `${formatTime(best.elapsedSeconds)} · 정답률 ${bestAcc}%` : "기록 없음");
   setText("r-tries", String(state.tries));
   setText("r-acc", `${acc}%`);
   setText("r-wrong", String(state.wrong));
@@ -980,13 +1199,17 @@ function renderWrongPage() {
 function makeNoteItem(q) {
   const div = document.createElement("div");
   div.className = "note-item";
-  div.innerHTML = `
-    <div class="txt">
-      <strong>${q.examType} · ${q.crop}</strong>
-      ${q.stage} / ${q.item}
-    </div>
-    <div class="ans">${q.answer}${q.unit}</div>
-  `;
+  const text = document.createElement("div");
+  text.className = "txt";
+  const title = document.createElement("strong");
+  title.textContent = `${q.examType} · ${q.crop}`;
+  text.appendChild(title);
+  text.appendChild(document.createTextNode(`\n      ${q.stage} / ${q.item}`));
+  const answer = document.createElement("div");
+  answer.className = "ans";
+  answer.textContent = `${q.answer}${q.unit || ""}`;
+  div.appendChild(text);
+  div.appendChild(answer);
   return div;
 }
 
@@ -994,18 +1217,18 @@ function clearWrongNotes() {
   if (!state.wrongNotes.length) return;
   if (!confirm("오답노트를 모두 삭제할까요?")) return;
   state.wrongNotes = [];
-  saveWrongNotes();
+  state.preservedWrongNotes = [];
+  saveWrongNotes([]);
   renderWrongPage();
 }
 
 function handleQuitPlay() {
   if (!confirm("진행 중인 플레이를 종료하고 홈으로 갈까요?")) return;
-  clearInterval(state.timeInterval);
-  clearTimeout(state.nextTimeout);
-  clearTimeout(state.ngTimeout);
-  clearTimeout(state.ngTimeout);
-  clearInterval(state.countdownTimer);
   state.runEnded = true;
+  state.stopwatchStarted = false;
+  state.stopwatchRunning = false;
+  state.stopwatchStartedAt = null;
+  clearRunHandles();
   showPage("home");
 }
 
@@ -1129,6 +1352,7 @@ function bindEvents() {
   document.addEventListener("change", (e) => {
     if (e.target.matches(".exam-check, .stage-check, .crop-check")) validatePracticeSelection();
   });
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 
   document.querySelectorAll(".modal-layer").forEach(layer => {
     layer.addEventListener("click", (e) => {
@@ -1141,6 +1365,7 @@ function init() {
   loadSettings();
   loadWrongNotes();
   loadBestRecord();
+  loadCompletionBest();
   initHomeAssets();
   preventImageLongPress();
   renderPracticeOptions();
