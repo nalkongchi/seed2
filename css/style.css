@@ -1840,3 +1840,39 @@ body #page-play .answer-zone .mobile-keypad .keypad-btn.control,
     min-height:36px !important;
   }
 }
+
+/* R2 short-landscape gameplay containment */
+@media (max-width:700px) and (max-height:400px) and (orientation:landscape){
+  #app{max-width:none;}
+  #page-play .play-flow{
+    grid-template-columns:minmax(0,1fr) minmax(276px,44%) !important;
+    grid-template-rows:auto minmax(0,1fr) minmax(54px,62px) !important;
+    column-gap:8px !important;
+    row-gap:3px !important;
+  }
+  #page-play .play-topbar{
+    grid-column:1 / -1 !important;
+    grid-row:1 !important;
+  }
+  #page-play .game-hero{
+    grid-column:1 !important;
+    grid-row:2 !important;
+    min-height:0 !important;
+    overflow:hidden !important;
+  }
+  #page-play .q-text{
+    grid-column:1 !important;
+    grid-row:3 !important;
+    min-height:54px !important;
+    max-height:62px !important;
+  }
+  #page-play .answer-zone{
+    grid-column:2 !important;
+    grid-row:2 / 4 !important;
+    width:100% !important;
+    height:100% !important;
+    min-height:0 !important;
+    padding-top:2px !important;
+    gap:3px !important;
+  }
+}

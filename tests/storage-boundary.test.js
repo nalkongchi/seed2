@@ -3126,6 +3126,103 @@ test("R1D R/S: numeric-equivalent tenth answer completes while wrong-note persis
   assert.equal(runtime.raw(seed.api.STORAGE_KEYS.wrongs), wrongRaw);
 });
 
+test("R2 A: 700px remains mobile and 701px switches the current answer phase to desktop input", () => {
+  const runtime = createRuntime({}, { viewportWidth: 700 });
+  runtime.api.init();
+  assert.equal(runtime.api.startTimeMode(), true);
+  runtime.runInterval(700, 3);
+
+  assert.equal(runtime.element("ans").readOnly, true);
+  assert.equal(runtime.element("btn-stop").classList.contains("hidden"), false);
+  runtime.api.stopSpin();
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), false);
+  assert.equal(runtime.element("btn-submit").classList.contains("hidden"), false);
+
+  runtime.resizeTo(701);
+  assert.equal(runtime.element("ans").readOnly, false);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), true);
+  assert.equal(runtime.element("btn-submit").classList.contains("hidden"), false);
+
+  runtime.resizeTo(700);
+  assert.equal(runtime.element("ans").readOnly, true);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), false);
+});
+
+test("R2 B: 701px desktop flow supports Enter for STOP and answer submission", () => {
+  const runtime = createRuntime({}, { viewportWidth: 701 });
+  runtime.api.init();
+  assert.equal(runtime.api.startTimeMode(), true);
+  runtime.runInterval(700, 3);
+
+  runtime.triggerKeydown("Enter");
+  assert.equal(runtime.api.state.runPhase, "answer");
+  assert.equal(runtime.element("ans").readOnly, false);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), true);
+
+  runtime.element("ans").value = runtime.api.state.curQuestion.answer;
+  runtime.triggerKeydown("Enter");
+  assert.equal(runtime.api.state.runPhase, "feedback");
+  assert.equal(runtime.api.state.correct, 1);
+  assert.equal(runtime.api.state.tries, 1);
+});
+
+test("R2 C: 667px mobile controls remain usable through spin, answer, feedback, and next round", () => {
+  const runtime = createRuntime({}, { viewportWidth: 667 });
+  runtime.api.init();
+  assert.equal(runtime.api.startTimeMode(), true);
+  runtime.runInterval(700, 3);
+  assert.equal(runtime.element("btn-stop").classList.contains("hidden"), false);
+
+  runtime.element("btn-stop").click();
+  assert.equal(runtime.api.state.runPhase, "answer");
+  assert.equal(runtime.element("ans").readOnly, true);
+  assert.equal(runtime.element("mobile-keypad").classList.contains("hidden"), false);
+  assert.equal(runtime.element("btn-submit").classList.contains("hidden"), false);
+
+  runtime.element("ans").value = runtime.api.state.curQuestion.answer;
+  runtime.element("btn-submit").click();
+  assert.equal(runtime.api.state.runPhase, "feedback");
+  assert.equal(runtime.api.state.correct, 1);
+  assert.equal(runtime.timeoutCount(850), 1);
+
+  runtime.runTimeout(850);
+  assert.equal(runtime.api.state.runPhase, "spin");
+  assert.equal(runtime.element("btn-stop").classList.contains("hidden"), false);
+});
+
+test("R2 D: short-landscape CSS uses a bounded two-column play layout without changing Stage 7 home geometry", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const marker = css.lastIndexOf("/* R2 short-landscape gameplay containment */");
+  const stage7 = css.indexOf("/* Stage 7 home coordinate-system stabilization */");
+  const stage10c = css.indexOf("/* Stage 10C safe-area and touch-target stabilization */");
+  assert.ok(marker > stage7);
+  assert.ok(marker > stage10c);
+  const r2 = css.slice(marker);
+
+  assert.match(r2, /@media \(max-width:700px\) and \(max-height:400px\) and \(orientation:landscape\)\{/);
+  assert.match(r2, /#app\{max-width:none;\}/);
+  assert.match(r2, /grid-template-columns:minmax\(0,1fr\) minmax\(276px,44%\) !important;/);
+  assert.match(r2, /grid-template-rows:auto minmax\(0,1fr\) minmax\(54px,62px\) !important;/);
+  assert.match(r2, /#page-play \.answer-zone\{[\s\S]*?grid-column:2 !important;[\s\S]*?grid-row:2 \/ 4 !important;[\s\S]*?height:100% !important;[\s\S]*?min-height:0 !important;/);
+  assert.doesNotMatch(r2, /#page-home|home-stage|btn-home-/);
+
+  for (const [width, height] of [[667, 375], [700, 390]]) {
+    const contentWidth = width - 20;
+    const contentHeight = height - 10;
+    const columnGap = 8;
+    const rowGap = 3;
+    const topbarHeight = 45;
+    const questionHeight = 54;
+    const answerWidth = Math.max(276, contentWidth * .44);
+    const rouletteWidth = contentWidth - columnGap - answerWidth;
+    const heroHeight = contentHeight - topbarHeight - questionHeight - rowGap * 2;
+    const answerHeight = heroHeight + rowGap + questionHeight;
+    assert.ok(rouletteWidth >= 350, `${width}x${height} roulette width`);
+    assert.ok(answerWidth >= 276, `${width}x${height} answer width`);
+    assert.ok(answerHeight >= 315, `${width}x${height} answer height`);
+  }
+});
+
 test("R1D copy and namespace audit: active product code has no Completion15 contract", () => {
   const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
