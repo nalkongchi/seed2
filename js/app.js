@@ -8,19 +8,20 @@ const STAGE_GROUP_MAP = {
   "보급종": ["보급종", "보급종포", "채종포 1세대"]
 };
 const EXCLUDED_STAGES = ["채종포 2세대"];
-const COMPLETION_TARGET = 15;
-const TIME_CHECKPOINT_VERSION = 2;
+const COMPLETION_TARGET = 10;
+const TIME_CHECKPOINT_VERSION = 3;
 const LEGACY_TIME_CHECKPOINT_VERSION = 1;
+const COMBO_TIME_CHECKPOINT_VERSION = 2;
 const TIME_CHECKPOINT_PHASES = ["spin", "answer", "feedback"];
 const STORAGE_KEYS = {
   best: "seedTraining_v1_2_bestTimeAttack",
-  completionBest: "seedTraining_v1_2_bestCompletion15",
-  inProgress: "seedTraining_v1_2_inProgressCompletion15",
+  completionBest: "seedTraining_v1_2_bestCompletion",
+  inProgress: "seedTraining_v1_2_inProgressCompletion",
   wrongs: "seedTraining_v1_2_wrongNotes",
   settings: "seedTraining_v1_2_settings"
 };
 const MODE_META = {
-  time: { en: "Time Attack", title: "실전모드", pill: "⚡ 15정답 완주", sub: "전체 범위 랜덤 · 정답 15개" },
+  time: { en: "Time Attack", title: "실전모드", pill: "⚡ 10정답 완주", sub: "전체 범위 랜덤 · 정답 10개" },
   practice: { en: "Practice", title: "연습모드", pill: "∞ 무한모드" },
   "wrong-practice": { en: "Wrong Notes", title: "오답 연습", pill: "📝 오답만", sub: "오답노트에 저장된 문제만 출제" }
 };
@@ -42,14 +43,18 @@ const state = {
   recentWrongs: [],
   wrongNotes: [],
   preservedWrongNotes: [],
+  pendingWrongNoteAdds: [],
+  pendingWrongNoteClear: null,
   settings: { bgmLevel: 3, sfx: true, vibrate: true },
   settingsDraft: null,
   elapsedMs: 0,
   completionElapsedSeconds: null,
+  resultCompletionRecord: null,
   stopwatchStarted: false,
   stopwatchRunning: false,
   stopwatchStartedAt: null,
   runPhase: "idle",
+  runId: null,
   timeCheckpoint: null,
   timeInterval: null,
   nextTimeout: null,
@@ -59,7 +64,7 @@ const state = {
   countdownTimer: null,
   audioCtx: null,
   timeAttackBest: { correct: 0, tries: 0, acc: 0 },
-  bestCompletion15: null,
+  bestCompletion: null,
   audioReady: false,
   currentBgm: null
 };
@@ -187,8 +192,30 @@ function isValidCompletionBest(value) {
 function findQuestionById(id) {
   return QUESTION_SET.find(q => q.id === id && isAllowedQuestion(q)) || null;
 }
+function createRunId() {
+  try {
+    const id = window.crypto?.randomUUID?.();
+    if (isNonEmptyString(id)) return id;
+  } catch (e) {}
+  return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+}
+function createLegacyRunId(value) {
+  const source = JSON.stringify(value);
+  let first = 2166136261;
+  let second = 2246822519;
+  for (let i = 0; i < source.length; i += 1) {
+    const code = source.charCodeAt(i);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code, 3266489917);
+  }
+  return `legacy-${(first >>> 0).toString(36)}-${(second >>> 0).toString(36)}`;
+}
 function normalizeTimeCheckpoint(value) {
-  if (!isPlainObject(value) || ![LEGACY_TIME_CHECKPOINT_VERSION, TIME_CHECKPOINT_VERSION].includes(value.version)) return null;
+  if (!isPlainObject(value) || ![
+    LEGACY_TIME_CHECKPOINT_VERSION,
+    COMBO_TIME_CHECKPOINT_VERSION,
+    TIME_CHECKPOINT_VERSION
+  ].includes(value.version)) return null;
   if (!Number.isInteger(value.correct) || value.correct < 0 || value.correct >= COMPLETION_TARGET) return null;
   if (!Number.isInteger(value.tries) || value.tries < value.correct) return null;
   if (!Number.isInteger(value.wrong) || value.wrong < 0) return null;
@@ -197,16 +224,22 @@ function normalizeTimeCheckpoint(value) {
   if (!TIME_CHECKPOINT_PHASES.includes(value.phase)) return null;
   if (!isNonEmptyString(value.questionId) || !findQuestionById(value.questionId)) return null;
   if (!Array.isArray(value.recentWrongIds) || !value.recentWrongIds.every(id => typeof id === "string")) return null;
-  if (value.version === LEGACY_TIME_CHECKPOINT_VERSION) {
-    return { ...value, version: TIME_CHECKPOINT_VERSION, combo: 0, maxCombo: 0 };
-  }
-  if (!Number.isInteger(value.combo) || value.combo < 0) return null;
-  if (!Number.isInteger(value.maxCombo) || value.maxCombo < 0) return null;
-  if (value.combo > value.maxCombo || value.combo > value.correct || value.maxCombo > value.correct) return null;
-  return { ...value };
+  const combo = value.version === LEGACY_TIME_CHECKPOINT_VERSION ? 0 : value.combo;
+  const maxCombo = value.version === LEGACY_TIME_CHECKPOINT_VERSION ? 0 : value.maxCombo;
+  if (!Number.isInteger(combo) || combo < 0) return null;
+  if (!Number.isInteger(maxCombo) || maxCombo < 0) return null;
+  if (combo > maxCombo || combo > value.correct || maxCombo > value.correct) return null;
+  const runId = value.version === TIME_CHECKPOINT_VERSION ? value.runId : createLegacyRunId(value);
+  if (!isNonEmptyString(runId)) return null;
+  return { ...value, version: TIME_CHECKPOINT_VERSION, combo, maxCombo, runId };
 }
 function isValidTimeCheckpoint(value) {
   return normalizeTimeCheckpoint(value) !== null;
+}
+function normalizeTimeCheckpointTerminal(value) {
+  if (!isPlainObject(value) || value.version !== TIME_CHECKPOINT_VERSION || value.terminal !== true) return null;
+  if (!isNonEmptyString(value.runId)) return null;
+  return { version: TIME_CHECKPOINT_VERSION, runId: value.runId, terminal: true };
 }
 function readJSON(key) {
   try {
@@ -543,7 +576,42 @@ function applyWrongNoteSnapshot(snapshot) {
   state.preservedWrongNotes = snapshot.preserved;
 }
 
+function getWrongNoteIntentKey(record) {
+  const canonical = findCanonicalQuestion(record);
+  if (canonical && isAllowedQuestion(canonical)) return `question:${canonical.id}`;
+  if (isPlainObject(record) && isNonEmptyString(record.id)) return `stored:${record.id}`;
+  try {
+    return `raw:${JSON.stringify(record)}`;
+  } catch (e) {
+    return `raw:${String(record)}`;
+  }
+}
+
+function filterPendingWrongNoteClear(records) {
+  const intent = state.pendingWrongNoteClear;
+  if (!intent) return records;
+  if (intent.all) return [];
+  const keys = new Set(intent.keys);
+  return records.filter(record => !keys.has(getWrongNoteIntentKey(record)));
+}
+
+function queuePendingWrongNoteAdd(canonical) {
+  if (state.pendingWrongNoteAdds.some(item => item.id === canonical.id)) return;
+  state.pendingWrongNoteAdds.unshift(canonical);
+}
+
+function applyLocalWrongNoteIntent() {
+  const local = normalizeWrongNoteRecords([
+    ...state.pendingWrongNoteAdds,
+    ...state.wrongNotes,
+    ...state.preservedWrongNotes
+  ]);
+  applyWrongNoteSnapshot(local);
+}
+
 function loadWrongNotes() {
+  state.pendingWrongNoteAdds = [];
+  state.pendingWrongNoteClear = null;
   const stored = readJSON(STORAGE_KEYS.wrongs);
   if (!stored.ok || !stored.exists || !Array.isArray(stored.value)) {
     state.wrongNotes = [];
@@ -568,12 +636,15 @@ function saveBestRecord() {
 }
 function loadCompletionBest() {
   const stored = readJSON(STORAGE_KEYS.completionBest);
-  state.bestCompletion15 = stored.ok && stored.exists && isValidCompletionBest(stored.value)
+  state.bestCompletion = stored.ok && stored.exists && isValidCompletionBest(stored.value)
     ? stored.value
     : null;
 }
-function saveCompletionBest() {
-  return saveJSON(STORAGE_KEYS.completionBest, state.bestCompletion15);
+function isCheckpointRunCompleted(runId) {
+  return isNonEmptyString(runId) && state.bestCompletion?.completedRunId === runId;
+}
+function saveCompletionBest(record = state.bestCompletion) {
+  return saveJSON(STORAGE_KEYS.completionBest, record);
 }
 function isBetterCompletionRecord(candidate, previous) {
   if (!isValidCompletionBest(candidate)) return false;
@@ -583,15 +654,126 @@ function isBetterCompletionRecord(candidate, previous) {
   }
   return candidate.tries < previous.tries;
 }
-function loadTimeCheckpoint() {
+function isSameCompletionRecord(first, second) {
+  return isValidCompletionBest(first) && isValidCompletionBest(second) &&
+    first.elapsedSeconds === second.elapsedSeconds && first.tries === second.tries;
+}
+function refreshCompletionBestBeforeWrite() {
+  const stored = readJSON(STORAGE_KEYS.completionBest);
+  if (!stored.ok) return { allowWrite: false };
+  if (!stored.exists) return { allowWrite: true, exists: false, record: null };
+  if (!isValidCompletionBest(stored.value)) return { allowWrite: false };
+  if (isBetterCompletionRecord(stored.value, state.bestCompletion)) {
+    state.bestCompletion = stored.value;
+  }
+  return { allowWrite: true, exists: true, record: stored.value };
+}
+function persistCompletionBest(candidate) {
+  const latest = refreshCompletionBestBeforeWrite();
+  const candidateIsBetter = isBetterCompletionRecord(candidate, state.bestCompletion);
+  if (candidateIsBetter) state.bestCompletion = candidate;
+  const desired = state.bestCompletion;
+
+  if (!latest.allowWrite) {
+    return { isNew: false, saveFailed: candidateIsBetter, persisted: false };
+  }
+  const needsWrite = isValidCompletionBest(desired) &&
+    (!latest.exists || isBetterCompletionRecord(desired, latest.record));
+  if (!needsWrite) {
+    return { isNew: false, saveFailed: false, persisted: true };
+  }
+  if (!saveCompletionBest(desired)) {
+    return { isNew: false, saveFailed: candidateIsBetter, persisted: false };
+  }
+
+  let verified = readJSON(STORAGE_KEYS.completionBest);
+  if (!verified.ok || !verified.exists || !isValidCompletionBest(verified.value)) {
+    return { isNew: false, saveFailed: candidateIsBetter, persisted: false };
+  }
+  if (isBetterCompletionRecord(verified.value, state.bestCompletion)) {
+    state.bestCompletion = verified.value;
+  } else if (isBetterCompletionRecord(state.bestCompletion, verified.value)) {
+    const retryRecord = state.bestCompletion;
+    if (!saveCompletionBest(retryRecord)) {
+      return { isNew: false, saveFailed: candidateIsBetter, persisted: false };
+    }
+    verified = readJSON(STORAGE_KEYS.completionBest);
+    if (!verified.ok || !verified.exists || !isValidCompletionBest(verified.value)) {
+      return { isNew: false, saveFailed: candidateIsBetter, persisted: false };
+    }
+    if (isBetterCompletionRecord(verified.value, state.bestCompletion)) {
+      state.bestCompletion = verified.value;
+    }
+  }
+
+  const persistedRecord = verified.value;
+  const persistedAtLeastAsGood = !isBetterCompletionRecord(state.bestCompletion, persistedRecord);
+  return {
+    isNew: candidateIsBetter && persistedAtLeastAsGood && isSameCompletionRecord(candidate, persistedRecord),
+    saveFailed: candidateIsBetter && !persistedAtLeastAsGood,
+    persisted: persistedAtLeastAsGood
+  };
+}
+function reconcileCompletionBestFromStorage(newValue) {
+  let incoming;
+  try {
+    incoming = typeof newValue === "string" ? JSON.parse(newValue) : null;
+  } catch (e) {
+    return;
+  }
+  if (!isValidCompletionBest(incoming)) return;
+
+  const stored = readJSON(STORAGE_KEYS.completionBest);
+  if (!stored.ok || (stored.exists && !isValidCompletionBest(stored.value))) return;
+  let best = state.bestCompletion;
+  if (isBetterCompletionRecord(incoming, best)) best = incoming;
+  if (stored.exists && isBetterCompletionRecord(stored.value, best)) best = stored.value;
+  state.bestCompletion = best;
+  if (isValidCompletionBest(best) && (!stored.exists || isBetterCompletionRecord(best, stored.value))) {
+    saveCompletionBest(best);
+  }
+  if ($("page-result")?.classList.contains("active")) {
+    renderCompletionBestResult();
+    if (isBetterCompletionRecord(state.bestCompletion, state.resultCompletionRecord)) {
+      $("new-badge").classList.add("hidden");
+    }
+  }
+}
+function markCompletedRunInBest(runId) {
+  if (!isNonEmptyString(runId)) return false;
+  const stored = readJSON(STORAGE_KEYS.completionBest);
+  if (!stored.ok || !stored.exists || !isValidCompletionBest(stored.value)) return false;
+  const marker = { ...stored.value, completedRunId: runId };
+  if (!saveCompletionBest(marker)) return false;
+  const verified = readJSON(STORAGE_KEYS.completionBest);
+  const marked = verified.ok && verified.exists && isValidCompletionBest(verified.value) &&
+    verified.value.completedRunId === runId;
+  if (marked) state.bestCompletion = verified.value;
+  return marked;
+}
+function readTimeCheckpointSnapshot() {
   const stored = readJSON(STORAGE_KEYS.inProgress);
-  state.timeCheckpoint = stored.ok && stored.exists ? normalizeTimeCheckpoint(stored.value) : null;
+  if (!stored.ok) return { ok: false, exists: false, checkpoint: null, terminal: null };
+  if (!stored.exists) return { ok: true, exists: false, checkpoint: null, terminal: null };
+  return {
+    ok: true,
+    exists: true,
+    checkpoint: normalizeTimeCheckpoint(stored.value),
+    terminal: normalizeTimeCheckpointTerminal(stored.value)
+  };
+}
+function loadTimeCheckpoint() {
+  const stored = readTimeCheckpointSnapshot();
+  state.timeCheckpoint = stored.ok && !isCheckpointRunCompleted(stored.checkpoint?.runId)
+    ? stored.checkpoint
+    : null;
   return state.timeCheckpoint;
 }
 function buildTimeCheckpoint(phase = state.runPhase) {
   const questionId = state.curQuestion?.id || "";
   const candidate = {
     version: TIME_CHECKPOINT_VERSION,
+    runId: state.runId,
     correct: state.correct,
     tries: state.tries,
     wrong: state.wrong,
@@ -610,24 +792,71 @@ function saveTimeCheckpoint(phase = state.runPhase) {
   if (!checkpoint) return false;
   state.runPhase = phase;
   state.timeCheckpoint = checkpoint;
+  const stored = readTimeCheckpointSnapshot();
+  if (!stored.ok) return false;
+  if (stored.exists && !stored.terminal && !isCheckpointRunCompleted(stored.checkpoint?.runId) &&
+      (!stored.checkpoint || stored.checkpoint.runId !== checkpoint.runId)) return false;
   return saveJSON(STORAGE_KEYS.inProgress, checkpoint);
 }
-function clearTimeCheckpoint() {
-  state.timeCheckpoint = null;
-  const removed = removeJSON(STORAGE_KEYS.inProgress);
-  if (!removed) {
-    saveJSON(STORAGE_KEYS.inProgress, {
-      version: TIME_CHECKPOINT_VERSION,
-      discarded: true
-    });
+function invalidateOwnedTimeCheckpoint(runId) {
+  if (!isNonEmptyString(runId)) return { invalidated: false, conflict: false, terminal: false };
+  const observed = readTimeCheckpointSnapshot();
+  if (!observed.ok) return { invalidated: false, conflict: false, terminal: false };
+  if (!observed.exists) return { invalidated: true, conflict: false, terminal: false };
+  if (observed.terminal) {
+    return observed.terminal.runId === runId
+      ? { invalidated: true, conflict: false, terminal: true }
+      : { invalidated: false, conflict: true, terminal: false };
   }
-  return removed;
+  if (!observed.checkpoint || observed.checkpoint.runId !== runId) {
+    return { invalidated: false, conflict: true, terminal: false };
+  }
+
+  const verified = readTimeCheckpointSnapshot();
+  if (!verified.ok || !verified.exists || !verified.checkpoint || verified.checkpoint.runId !== runId) {
+    return { invalidated: !verified.exists, conflict: verified.exists, terminal: false };
+  }
+  if (removeJSON(STORAGE_KEYS.inProgress)) {
+    return { invalidated: true, conflict: false, terminal: false };
+  }
+
+  const afterRemove = readTimeCheckpointSnapshot();
+  if (!afterRemove.ok) return { invalidated: false, conflict: false, terminal: false };
+  if (!afterRemove.exists) return { invalidated: true, conflict: false, terminal: false };
+  if (afterRemove.terminal) {
+    return afterRemove.terminal.runId === runId
+      ? { invalidated: true, conflict: false, terminal: true }
+      : { invalidated: false, conflict: true, terminal: false };
+  }
+  if (!afterRemove.checkpoint || afterRemove.checkpoint.runId !== runId) {
+    return { invalidated: false, conflict: true, terminal: false };
+  }
+  const terminal = saveJSON(STORAGE_KEYS.inProgress, {
+    version: TIME_CHECKPOINT_VERSION,
+    runId,
+    terminal: true
+  });
+  return { invalidated: terminal, conflict: false, terminal };
+}
+function clearTimeCheckpoint(runId = state.runId || state.timeCheckpoint?.runId) {
+  if (state.timeCheckpoint?.runId === runId) state.timeCheckpoint = null;
+  return invalidateOwnedTimeCheckpoint(runId).invalidated;
+}
+function refreshTimeCheckpointForIntro() {
+  const stored = readTimeCheckpointSnapshot();
+  if (!stored.ok) return state.timeCheckpoint;
+  if (stored.checkpoint && !isCheckpointRunCompleted(stored.checkpoint.runId)) state.timeCheckpoint = stored.checkpoint;
+  else if (stored.checkpoint && isCheckpointRunCompleted(stored.checkpoint.runId)) state.timeCheckpoint = null;
+  else if (stored.terminal && state.timeCheckpoint?.runId === stored.terminal.runId) state.timeCheckpoint = null;
+  else if (!stored.exists && !isValidTimeCheckpoint(state.timeCheckpoint)) state.timeCheckpoint = null;
+  return state.timeCheckpoint;
 }
 function getCheckpointSummary(checkpoint = state.timeCheckpoint) {
   if (!isValidTimeCheckpoint(checkpoint)) return "";
   return `정답 ${checkpoint.correct} / ${COMPLETION_TARGET} · 플레이 시간 ${formatTime(Math.floor(checkpoint.elapsedMs / 1000))}`;
 }
-function renderTimeIntro() {
+function renderTimeIntro({ refresh = true } = {}) {
+  if (refresh) refreshTimeCheckpointForIntro();
   const checkpoint = state.timeCheckpoint;
   const resumable = isValidTimeCheckpoint(checkpoint);
   show("time-resume-card", resumable);
@@ -727,6 +956,7 @@ function clearRunHandles() {
 
 function resetRunCommon() {
   clearRunHandles();
+  state.runId = null;
   state.curQuestion = null;
   state.spinning = false;
   state.scored = false;
@@ -739,6 +969,7 @@ function resetRunCommon() {
   state.runEnded = false;
   state.elapsedMs = 0;
   state.completionElapsedSeconds = null;
+  state.resultCompletionRecord = null;
   state.stopwatchStarted = false;
   state.stopwatchRunning = false;
   state.stopwatchStartedAt = null;
@@ -791,13 +1022,33 @@ function formatQuestionHTML(q) {
   return `<span class="q-label">질문</span><span class="q-line q-context"><strong>${escapeHTML(q.examType)}</strong> · <strong>${escapeHTML(q.stage)}</strong> · <strong>${escapeHTML(q.crop)}</strong></span><span class="q-line q-ask"><span class="q-item">${escapeHTML(q.item)}</span> 기준값은?</span>`;
 }
 
-function startTimeMode() {
+function showLatestTimeCheckpointIntro() {
+  refreshTimeCheckpointForIntro();
+  renderTimeIntro({ refresh: false });
+  if (!$('page-time-intro')?.classList.contains('active')) openModal("time-intro");
+}
+
+function startTimeMode({ takeoverRunId = null } = {}) {
+  const stored = readTimeCheckpointSnapshot();
+  if (stored.ok && stored.checkpoint && !isCheckpointRunCompleted(stored.checkpoint.runId)) {
+    if (!isNonEmptyString(takeoverRunId) || stored.checkpoint.runId !== takeoverRunId) {
+      state.timeCheckpoint = stored.checkpoint;
+      showLatestTimeCheckpointIntro();
+      return false;
+    }
+    const takeover = invalidateOwnedTimeCheckpoint(takeoverRunId);
+    if (!takeover.invalidated) {
+      showLatestTimeCheckpointIntro();
+      return false;
+    }
+  }
   prepareAudio();
   closeModal("time-intro");
-  clearTimeCheckpoint();
   state.mode = "time";
   state.pool = QUESTION_SET.filter(isAllowedQuestion);
   resetRunCommon();
+  state.runId = createRunId();
+  state.timeCheckpoint = null;
   updatePlayHeader();
   showPage("play");
   state.runPhase = "countdown";
@@ -806,25 +1057,34 @@ function startTimeMode() {
     startStopwatch();
     startRound();
   });
+  return true;
 }
 
 function resumeTimeMode() {
-  const checkpoint = state.timeCheckpoint;
-  if (!isValidTimeCheckpoint(checkpoint)) {
+  let checkpoint = state.timeCheckpoint;
+  if (!isValidTimeCheckpoint(checkpoint) || isCheckpointRunCompleted(checkpoint.runId)) {
+    state.timeCheckpoint = null;
     renderTimeIntro();
-    return;
+    return false;
+  }
+  const stored = readTimeCheckpointSnapshot();
+  if (stored.ok && (!stored.checkpoint || stored.checkpoint.runId !== checkpoint.runId)) {
+    state.timeCheckpoint = stored.checkpoint;
+    renderTimeIntro({ refresh: false });
+    return false;
   }
   const question = findQuestionById(checkpoint.questionId);
   if (!question) {
     state.timeCheckpoint = null;
     renderTimeIntro();
-    return;
+    return false;
   }
   prepareAudio();
   closeModal("time-intro");
   state.mode = "time";
   state.pool = QUESTION_SET.filter(isAllowedQuestion);
   resetRunCommon();
+  state.runId = checkpoint.runId;
   state.correct = checkpoint.correct;
   state.tries = checkpoint.tries;
   state.wrong = checkpoint.wrong;
@@ -845,6 +1105,7 @@ function resumeTimeMode() {
   } else {
     startRound();
   }
+  return true;
 }
 
 function startNewTimeModeFromCheckpoint() {
@@ -855,7 +1116,7 @@ function startNewTimeModeFromCheckpoint() {
   }
   const summary = `${checkpoint.correct}/${COMPLETION_TARGET} · ${formatTime(Math.floor(checkpoint.elapsedMs / 1000))}`;
   if (!confirm(`진행 중인 기록(${summary})을 삭제하고 새로 시작할까요?`)) return;
-  startTimeMode();
+  startTimeMode({ takeoverRunId: checkpoint.runId });
 }
 
 function startPracticeMode() {
@@ -1318,7 +1579,7 @@ function evaluateAnswer() {
     $("ans").classList.add("ok");
     $("ans").setAttribute("aria-invalid", "false");
     setFeedback(
-      completedTimeMode ? "🎉 15개 정답 달성!" : formatFeedback(state.curQuestion, true, state.combo),
+      completedTimeMode ? "🎉 10개 정답 달성!" : formatFeedback(state.curQuestion, true, state.combo),
       "ok"
     );
     playEffect("se-correct", "correct");
@@ -1362,23 +1623,39 @@ function pushWrongNote(q) {
   const stored = readJSON(STORAGE_KEYS.wrongs);
   if (!stored.ok || (stored.exists && !Array.isArray(stored.value))) {
     if (!state.wrongNotes.some(item => item.id === canonical.id)) {
-      state.wrongNotes.unshift(canonical);
+      queuePendingWrongNoteAdd(canonical);
     }
-    return;
+    applyLocalWrongNoteIntent();
+    return false;
   }
 
-  const snapshot = normalizeWrongNoteRecords(stored.exists ? stored.value : []);
+  const persistedRecords = filterPendingWrongNoteClear(stored.exists ? stored.value : []);
+  const snapshot = normalizeWrongNoteRecords(persistedRecords);
   const alreadyPersisted = snapshot.active.some(item => item.id === canonical.id);
-  if (alreadyPersisted) {
+  if (!alreadyPersisted) queuePendingWrongNoteAdd(canonical);
+
+  if (!state.pendingWrongNoteAdds.length && !state.pendingWrongNoteClear) {
     applyWrongNoteSnapshot(snapshot);
-    if (snapshot.migrated && !snapshot.hasMalformedItems) saveWrongNotes(snapshot.records);
-    return;
+    if (snapshot.migrated && !snapshot.hasMalformedItems) return saveWrongNotes(snapshot.records);
+    return true;
   }
 
-  const mergedRecords = [canonical, ...snapshot.records];
+  const mergedRecords = [...state.pendingWrongNoteAdds, ...snapshot.records];
   const merged = normalizeWrongNoteRecords(mergedRecords);
   applyWrongNoteSnapshot(merged);
-  saveWrongNotes(merged.records);
+  const saved = saveWrongNotes(merged.records);
+  if (saved) {
+    state.pendingWrongNoteAdds = [];
+    state.pendingWrongNoteClear = null;
+  }
+  return saved;
+}
+
+function renderCompletionBestResult(saveFailed = false) {
+  const best = state.bestCompletion;
+  const bestAcc = best ? Math.round((COMPLETION_TARGET / best.tries) * 100) : 0;
+  const label = best ? `${formatTime(best.elapsedSeconds)} · 정답률 ${bestAcc}%` : "기록 없음";
+  setText("r-best", saveFailed ? `${label} · 기록 저장 실패` : label);
 }
 
 function finishTimeMode() {
@@ -1390,7 +1667,7 @@ function finishTimeMode() {
   show("btn-submit", false);
   show("mobile-keypad", false);
   show("input-row", false);
-  setFeedback("🎉 15개 정답 달성!", "ok");
+  setFeedback("🎉 10개 정답 달성!", "ok");
   stopAllBgm();
   playEffect("se-finish", "start");
   maybeVibrate([80, 60, 120]);
@@ -1399,24 +1676,21 @@ function finishTimeMode() {
     elapsedSeconds: state.completionElapsedSeconds,
     tries: state.tries
   };
-  const isNew = isBetterCompletionRecord(candidate, state.bestCompletion15);
-  if (isNew) {
-    state.bestCompletion15 = candidate;
-    saveCompletionBest();
-  }
-  clearTimeCheckpoint();
-  $("new-badge").classList.toggle("hidden", !isNew);
+  state.resultCompletionRecord = candidate;
+  const bestResult = persistCompletionBest(candidate);
+  const completedRunId = state.runId || state.timeCheckpoint?.runId;
+  const checkpointInvalidated = clearTimeCheckpoint(completedRunId);
+  if (!checkpointInvalidated && bestResult.persisted) markCompletedRunInBest(completedRunId);
+  $("new-badge").classList.toggle("hidden", !bestResult.isNew);
   setText("r-correct", formatTime(state.completionElapsedSeconds));
-  const best = state.bestCompletion15;
-  const bestAcc = best ? Math.round((COMPLETION_TARGET / best.tries) * 100) : 0;
-  setText("r-best", best ? `${formatTime(best.elapsedSeconds)} · 정답률 ${bestAcc}%` : "기록 없음");
+  renderCompletionBestResult(bestResult.saveFailed);
   setText("r-tries", String(state.tries));
   setText("r-acc", `${acc}%`);
   setText("r-wrong", String(state.wrong));
   setText("r-max-combo", String(state.maxCombo));
   renderResultWrongs();
   showPage("result", { syncBgm: false });
-  if (isNew) launchConfetti();
+  if (bestResult.isNew) launchConfetti();
   setTimeout(() => {
     if ($("page-result")?.classList.contains("active")) playBgm("bgm-home");
   }, 750);
@@ -1509,11 +1783,27 @@ function makeNoteItem(q) {
 }
 
 function clearWrongNotes() {
-  if (!state.wrongNotes.length) return;
+  if (!state.wrongNotes.length && !state.pendingWrongNoteClear) return;
   if (!confirm("오답노트를 모두 삭제할까요?")) return;
+  const stored = readJSON(STORAGE_KEYS.wrongs);
+  const existingIntent = state.pendingWrongNoteClear;
+  if (!stored.ok || (stored.exists && !Array.isArray(stored.value))) {
+    state.pendingWrongNoteClear = { all: true, keys: [] };
+  } else {
+    const clearRecords = [
+      ...(stored.exists ? stored.value : []),
+      ...state.wrongNotes,
+      ...state.preservedWrongNotes,
+      ...state.pendingWrongNoteAdds
+    ];
+    const keys = new Set(existingIntent?.keys || []);
+    clearRecords.forEach(record => keys.add(getWrongNoteIntentKey(record)));
+    state.pendingWrongNoteClear = { all: !!existingIntent?.all, keys: [...keys] };
+  }
   state.wrongNotes = [];
   state.preservedWrongNotes = [];
-  saveWrongNotes([]);
+  state.pendingWrongNoteAdds = [];
+  if (saveWrongNotes([])) state.pendingWrongNoteClear = null;
   renderWrongPage();
 }
 
@@ -1537,6 +1827,34 @@ function handlePageHide() {
   if (state.mode !== "time" || state.runEnded || !state.stopwatchStarted) return;
   pauseStopwatch();
   saveTimeCheckpoint();
+}
+
+function handleStorageChange(event) {
+  if (event.storageArea && event.storageArea !== localStorage) return;
+  if (event.key === STORAGE_KEYS.completionBest) {
+    reconcileCompletionBestFromStorage(event.newValue);
+    return;
+  }
+  if (event.key !== STORAGE_KEYS.inProgress) return;
+  if (state.mode === "time" && !state.runEnded && state.stopwatchStarted) return;
+
+  if (event.newValue === null) {
+    state.timeCheckpoint = null;
+  } else {
+    let value;
+    try {
+      value = JSON.parse(event.newValue);
+    } catch (e) {
+      return;
+    }
+    const checkpoint = normalizeTimeCheckpoint(value);
+    const terminal = normalizeTimeCheckpointTerminal(value);
+    if (checkpoint && !isCheckpointRunCompleted(checkpoint.runId)) state.timeCheckpoint = checkpoint;
+    else if (checkpoint) state.timeCheckpoint = null;
+    else if (terminal) state.timeCheckpoint = null;
+    else return;
+  }
+  if ($("page-time-intro")?.classList.contains("active")) renderTimeIntro({ refresh: false });
 }
 
 function renderSlotValue(el, text, kind = "text") {
@@ -1666,6 +1984,7 @@ function bindEvents() {
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("resize", syncPlayControlsForViewport);
   window.addEventListener("pagehide", handlePageHide);
+  window.addEventListener("storage", handleStorageChange);
 
   document.querySelectorAll(".modal-layer").forEach(layer => {
     layer.addEventListener("click", (e) => {
