@@ -71,7 +71,6 @@
       <p>전체 범위에서 문제가 무작위로 출제됩니다.</p>
       <p>정답 10개를 맞히면 실전모드가 종료됩니다.</p>
       <p>완료까지 걸린 플레이 시간이 기록됩니다.</p>
-      <p>※ 완료시간이 같으면 정답률이 높은 기록이 우선합니다.</p>
     </div>
 
     <div class="setup-card panel time-intro-card hidden" id="time-resume-card">
@@ -185,7 +184,7 @@
       <button class="keypad-btn" data-key="9">9</button>
       <button class="keypad-btn wide" data-key="0">0</button>
       <button class="keypad-btn" data-key=".">.</button>
-      <button class="keypad-btn control" data-key="backspace">←</button>
+      <button class="keypad-btn control" data-key="backspace" aria-label="한 글자 지우기">←</button>
     </div>
     <button class="btn btn-submit hidden" id="btn-submit">✔️ 제출</button>
     <button class="btn btn-stop hidden" id="btn-stop">🛑 STOP</button>
@@ -329,8 +328,8 @@
 </div>
 
   <audio id="bgm-home" preload="auto" loop src="audio/bgm_home.mp3"></audio>
-  <audio id="bgm-play" preload="auto" loop src="audio/bgm_play.mp3"></audio>
-  <audio id="bgm-play2" preload="auto" loop src="audio/bgm_play2.mp3"></audio>
+  <audio id="bgm-play" preload="none" loop src="audio/bgm_play.mp3"></audio>
+  <audio id="bgm-play2" preload="none" loop src="audio/bgm_play2.mp3"></audio>
   <audio id="se-correct" preload="auto" src="audio/se_correct.wav"></audio>
   <audio id="se-wrong" preload="auto" src="audio/se_wrong.wav"></audio>
   <audio id="se-finish" preload="auto" src="audio/se_finish.wav"></audio>

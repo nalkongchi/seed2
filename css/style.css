@@ -1876,3 +1876,215 @@ body #page-play .answer-zone .mobile-keypad .keypad-btn.control,
     gap:3px !important;
   }
 }
+
+/* Stage 10D reduced-motion accessibility */
+@media (prefers-reduced-motion: reduce){
+  .page,
+  .btn-stop,
+  .ans-input.ok,
+  .ans-input.ng,
+  .trophy-icon,
+  .new-badge,
+  #page-result .confetti-piece{
+    animation:none !important;
+  }
+
+  .btn,
+  .home-image-btn,
+  .home-bg-image,
+  .pbar-fill,
+  .slot,
+  .feedback,
+  .ans-input,
+  .slider,
+  .slider::before{
+    transition:none !important;
+  }
+
+  .btn:active,
+  .home-image-btn:active,
+  .modal-close:active,
+  .top-home-btn:active,
+  .keypad-btn:active,
+  .volume-btn:active,
+  .slot.stopped{
+    transform:none !important;
+  }
+
+  .exam-chip.spinning{
+    color:transparent !important;
+    filter:none !important;
+    opacity:1 !important;
+  }
+  .exam-chip.spinning::after{
+    content:"검사 대기";
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:#fff0b6;
+  }
+  .slot.spinning .slot-val{
+    animation:none !important;
+    color:transparent !important;
+    filter:none !important;
+    opacity:1 !important;
+    transform:none !important;
+  }
+  .slot.spinning .slot-val::after{
+    content:"…";
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color:#8a7a55;
+  }
+
+  #page-result .confetti-layer{
+    display:none !important;
+  }
+}
+
+/* Stage 10E long-text and overflow resilience */
+#page-play .play-topbar,
+#page-play .mode-banner,
+#page-play .game-shell,
+#page-play .shell-topbar,
+#page-play .slots-row,
+#page-play .slot,
+#page-play .slot-val,
+#page-play .q-text,
+#page-play .q-text .q-line,
+#page-play .answer-zone,
+#page-play .feedback,
+#page-play .feedback .criteria,
+#page-play .input-row,
+#page-play .ans-input{
+  min-width:0;
+  max-width:100%;
+}
+#page-play .exam-chip,
+#page-play .slot-val,
+#page-play .q-text,
+#page-play .q-text .q-line,
+#page-play .q-text .q-context,
+#page-play .q-text .q-ask,
+#page-play .feedback,
+#page-play .feedback .criteria{
+  overflow-wrap:anywhere;
+}
+#page-play .exam-chip{
+  white-space:normal;
+  text-align:center;
+  line-height:1.2;
+}
+#page-play .slot-val{
+  word-break:normal;
+}
+#page-play .q-text{
+  overflow-x:hidden !important;
+  overflow-y:auto !important;
+  word-break:normal !important;
+  overscroll-behavior:contain;
+}
+#page-play .feedback,
+#page-play .feedback .criteria{
+  word-break:normal !important;
+}
+
+.modal-window{
+  min-width:0;
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+}
+.modal-window > *,
+.modal-window .setup-card,
+.modal-window .setting-card,
+.modal-window .toggle-row,
+.modal-window .meta,
+.modal-window .btn-row,
+.modal-window .list-scroll,
+.modal-window .note-item{
+  min-width:0;
+  max-width:100%;
+}
+.modal-window .time-intro-card,
+.modal-window .setup-note,
+.modal-window .toggle-row .meta,
+.modal-window .toggle-row .meta span,
+.modal-window .check-item span,
+.modal-window .empty-state,
+.modal-window .btn{
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+.modal-window .btn-row,
+#page-result .btn-row{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+}
+.modal-window .btn{
+  height:auto;
+  min-height:44px;
+  padding:8px 10px;
+  white-space:normal;
+  line-height:1.25;
+}
+#page-practice-setup .setup-card{
+  flex-shrink:0;
+}
+.modal-window .list-scroll{
+  min-height:0;
+  overflow-y:auto;
+}
+
+.list-scroll{
+  min-width:0;
+  max-width:100%;
+  overflow-x:hidden;
+}
+.note-item,
+.note-item .txt{
+  min-width:0;
+  max-width:100%;
+}
+.note-item .txt,
+.note-item .txt strong,
+.note-item .ans{
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+.note-item .ans{
+  max-width:42%;
+}
+
+#page-result .result-layout,
+#page-result .result-hero,
+#page-result .result-mini-grid,
+#page-result .stat-card,
+#page-result .result-wrong-panel,
+#page-result .new-badge,
+#page-result .result-title,
+#page-result #r-best{
+  min-width:0;
+  max-width:100%;
+}
+#page-result .result-title,
+#page-result .result-hero p,
+#page-result .new-badge,
+#page-result #r-best,
+#page-result .btn-row .btn{
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+
+@media (max-width:700px){
+  #page-play .answer-zone.result-feedback .feedback{
+    max-height:clamp(72px,12svh,96px) !important;
+    overflow-x:hidden !important;
+    overflow-y:auto !important;
+    overscroll-behavior:contain;
+  }
+}

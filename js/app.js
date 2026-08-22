@@ -66,7 +66,9 @@ const state = {
   timeAttackBest: { correct: 0, tries: 0, acc: 0 },
   bestCompletion: null,
   audioReady: false,
-  currentBgm: null
+  currentBgm: null,
+  bgmPlayRequest: 0,
+  bgmLifecyclePaused: false
 };
 
 const modalOpeners = new Map();
@@ -93,7 +95,9 @@ function showPage(id, opts = {}) {
 }
 function isAvailableFocusable(el) {
   return !!el && !el.disabled && !el.hidden && el.getAttribute?.("aria-hidden") !== "true" &&
-    !el.classList?.contains("hidden") && !el.closest?.(".hidden") && typeof el.focus === "function";
+    !el.classList?.contains("hidden") && !el.closest?.(".hidden") &&
+    (typeof el.getClientRects !== "function" || el.getClientRects().length > 0) &&
+    typeof el.focus === "function";
 }
 function getModalFocusables(modal) {
   return modal ? [...modal.querySelectorAll(MODAL_FOCUSABLE_SELECTOR)].filter(isAvailableFocusable) : [];
@@ -334,19 +338,19 @@ function applyAudioVolumes(settings = state.settings) {
   });
 }
 function prepareAudio() {
-  if (!state.audioReady) {
-    state.audioReady = true;
-    ["bgm-home","bgm-play","bgm-play2","se-correct","se-wrong","se-finish"].forEach(id => {
-      const el = $(id);
-      if (el) {
-        try { el.load(); } catch (e) {}
-      }
-    });
-  }
+  if (!state.audioReady) state.audioReady = true;
   applyAudioVolumes();
 }
 
+function warmAudio(id, settings = state.settings) {
+  if (getBgmVolume(settings) <= 0) return;
+  const el = $(id);
+  if (!el) return;
+  try { el.load(); } catch (e) {}
+}
+
 function stopAllBgm() {
+  state.bgmPlayRequest += 1;
   ["bgm-home","bgm-play","bgm-play2"].forEach(id => {
     const el = $(id);
     if (el) {
@@ -357,31 +361,78 @@ function stopAllBgm() {
   state.currentBgm = null;
 }
 
-function playBgm(id) {
+function isBgmPlaybackDesired(id) {
+  return state.currentBgm === id && !state.bgmLifecyclePaused && !document.hidden &&
+    getBgmVolume(state.settingsDraft || state.settings) > 0;
+}
+
+function playBgm(id, settings = state.settings) {
   prepareAudio();
-  if (getBgmVolume() <= 0) { stopAllBgm(); return; }
+  if (getBgmVolume(settings) <= 0) { stopAllBgm(); return; }
   const next = $(id);
   if (!next) return;
-  if (state.currentBgm === id && !next.paused) return;
-  stopAllBgm();
-  applyAudioVolumes();
-  const promise = next.play();
+  applyAudioVolumes(settings);
+  if (state.currentBgm !== id) {
+    stopAllBgm();
+    applyAudioVolumes(settings);
+    state.currentBgm = id;
+  }
+  if (document.hidden || state.bgmLifecyclePaused) {
+    state.bgmLifecyclePaused = true;
+    state.bgmPlayRequest += 1;
+    next.pause();
+    return;
+  }
+  if (!next.paused) return;
+  const request = ++state.bgmPlayRequest;
   state.currentBgm = id;
-  if (promise && typeof promise.catch === "function") {
-    promise.catch(() => {
+  let promise;
+  try {
+    promise = next.play();
+  } catch (e) {
+    if (request === state.bgmPlayRequest && state.currentBgm === id) {
+      next.pause();
+      state.currentBgm = null;
+    }
+    return;
+  }
+  if (promise && typeof promise.then === "function") {
+    promise.then(() => {
+      if (request !== state.bgmPlayRequest && !isBgmPlaybackDesired(id)) next.pause();
+    }, () => {
+      if (request !== state.bgmPlayRequest || state.currentBgm !== id) return;
+      next.pause();
       state.currentBgm = null;
     });
   }
 }
 
-function syncBgmForPage(pageId) {
-  if (getBgmVolume() <= 0) { stopAllBgm(); return; }
-  if (pageId === "home") playBgm("bgm-home");
-  else if (pageId === "play") {
-    if (state.mode === "practice" || state.mode === "wrong-practice") playBgm("bgm-play2");
-    else playBgm("bgm-play");
+function pauseBgmForLifecycle() {
+  if (state.bgmLifecyclePaused) return;
+  state.bgmLifecyclePaused = true;
+  state.bgmPlayRequest += 1;
+  ["bgm-home","bgm-play","bgm-play2"].forEach(id => $(id)?.pause());
+}
+
+function resumeBgmAfterLifecycle() {
+  if (!state.bgmLifecyclePaused || document.hidden) return;
+  state.bgmLifecyclePaused = false;
+  const settings = state.settingsDraft || state.settings;
+  if (getBgmVolume(settings) <= 0) {
+    stopAllBgm();
+    return;
   }
-  else if (pageId === "result") playBgm("bgm-home");
+  syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home", settings);
+}
+
+function syncBgmForPage(pageId, settings = state.settings) {
+  if (getBgmVolume(settings) <= 0) { stopAllBgm(); return; }
+  if (pageId === "home") playBgm("bgm-home", settings);
+  else if (pageId === "play") {
+    if (state.mode === "practice" || state.mode === "wrong-practice") playBgm("bgm-play2", settings);
+    else playBgm("bgm-play", settings);
+  }
+  else if (pageId === "result") playBgm("bgm-home", settings);
 }
 
 function ensureHomeBgm(force = false) {
@@ -462,13 +513,7 @@ function previewBgmLevel() {
     stopAllBgm();
     return;
   }
-  const current = state.currentBgm && $(state.currentBgm);
-  if (current && current.paused) {
-    try {
-      const promise = current.play();
-      if (promise && typeof promise.catch === "function") promise.catch(() => {});
-    } catch (e) {}
-  }
+  syncBgmForPage(document.querySelector(".base-page.active")?.id?.replace("page-","") || "home", draft);
 }
 function adjustBgmLevel(delta) {
   prepareAudio();
@@ -1300,12 +1345,16 @@ function freezeStopwatch() {
 }
 
 function handleVisibilityChange() {
-  if (state.mode !== "time" || state.runEnded || !state.stopwatchStarted) return;
   if (document.hidden) {
-    pauseStopwatch();
-    saveTimeCheckpoint();
+    if (state.mode === "time" && !state.runEnded && state.stopwatchStarted) {
+      pauseStopwatch();
+      saveTimeCheckpoint();
+    }
+    pauseBgmForLifecycle();
+    return;
   }
-  else resumeStopwatch();
+  if (state.mode === "time" && !state.runEnded && state.stopwatchStarted) resumeStopwatch();
+  resumeBgmAfterLifecycle();
 }
 
 function getStageWeight(stage) {
@@ -1450,7 +1499,7 @@ function startSpinVisual(targetQ) {
   state.spinIntervals.push(setInterval(() => {
     setText("play-examtype-chip", examPool[e % examPool.length] || "검사종류");
     e += 1;
-  }, 115));
+  }, 128));
   slots.forEach((slot, idx) => {
     slot.box.classList.add("spinning");
     slot.box.classList.remove("stopped");
@@ -1459,7 +1508,7 @@ function startSpinVisual(targetQ) {
       const text = pools[idx][i % pools[idx].length] || "?";
       renderSlotValue(slot.val, text, slot.type);
       i += 1;
-    }, 95 + idx * 10));
+    }, 106 + idx * 11));
   });
 }
 
@@ -1824,9 +1873,17 @@ function handleQuitPlay() {
 }
 
 function handlePageHide() {
-  if (state.mode !== "time" || state.runEnded || !state.stopwatchStarted) return;
-  pauseStopwatch();
-  saveTimeCheckpoint();
+  if (state.mode === "time" && !state.runEnded && state.stopwatchStarted) {
+    pauseStopwatch();
+    saveTimeCheckpoint();
+  }
+  pauseBgmForLifecycle();
+}
+
+function handlePageShow(event) {
+  if (!event?.persisted || document.hidden) return;
+  if (state.mode === "time" && !state.runEnded && state.stopwatchStarted) resumeStopwatch();
+  resumeBgmAfterLifecycle();
 }
 
 function handleStorageChange(event) {
@@ -1918,8 +1975,8 @@ function bindEvents() {
   $("page-home").addEventListener("touchstart", homeInteract, { passive: true });
   $("page-home").addEventListener("click", homeInteract, { passive: true });
 
-  $("btn-home-time").addEventListener("click", (e) => { ensureHomeBgm(); maybeBeep("button"); renderTimeIntro(); openModal("time-intro", e.currentTarget); });
-  $("btn-home-practice").addEventListener("click", (e) => { ensureHomeBgm(); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup", e.currentTarget); });
+  $("btn-home-time").addEventListener("click", (e) => { ensureHomeBgm(); warmAudio("bgm-play"); maybeBeep("button"); renderTimeIntro(); openModal("time-intro", e.currentTarget); });
+  $("btn-home-practice").addEventListener("click", (e) => { ensureHomeBgm(); warmAudio("bgm-play2"); maybeBeep("button"); validatePracticeSelection(); openModal("practice-setup", e.currentTarget); });
   $("btn-home-wrong").addEventListener("click", (e) => { ensureHomeBgm(); maybeBeep("button"); renderWrongPage(); openModal("wrong", e.currentTarget); });
   $("btn-home-settings").addEventListener("click", (e) => { ensureHomeBgm(); maybeBeep("button"); beginSettingsEdit(); openModal("settings", e.currentTarget); });
 
@@ -1944,7 +2001,7 @@ function bindEvents() {
   $("btn-result-retry").addEventListener("click", () => { maybeBeep("button"); startTimeMode(); });
   $("btn-result-home").addEventListener("click", () => { maybeBeep("button"); showPage("home"); });
 
-  $("btn-wrong-practice").addEventListener("click", () => { maybeBeep("button"); startWrongPracticeMode(); });
+  $("btn-wrong-practice").addEventListener("click", () => { warmAudio("bgm-play2"); maybeBeep("button"); startWrongPracticeMode(); });
   $("btn-wrong-clear").addEventListener("click", () => { maybeBeep("button"); clearWrongNotes(); });
   $("btn-wrong-close").addEventListener("click", () => { maybeBeep("button"); closeModal("wrong"); });
 
@@ -1984,6 +2041,7 @@ function bindEvents() {
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("resize", syncPlayControlsForViewport);
   window.addEventListener("pagehide", handlePageHide);
+  window.addEventListener("pageshow", handlePageShow);
   window.addEventListener("storage", handleStorageChange);
 
   document.querySelectorAll(".modal-layer").forEach(layer => {

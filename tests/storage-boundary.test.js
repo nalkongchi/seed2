@@ -34,6 +34,7 @@ globalThis.__storageTest = {
   getElapsedSeconds,
   handleVisibilityChange,
   handlePageHide,
+  handlePageShow,
   isBetterCompletionRecord,
   persistCompletionBest,
   handleStorageChange,
@@ -51,6 +52,11 @@ globalThis.__storageTest = {
   adjustBgmLevel,
   syncSettingsDraftFromUI,
   getBgmVolume,
+  playBgm,
+  stopAllBgm,
+  syncBgmForPage,
+  previewBgmLevel,
+  warmAudio,
   pushWrongNote,
   clearWrongNotes,
   startWrongPracticeMode,
@@ -94,9 +100,14 @@ class FakeElement {
     this.complete = false;
     this.naturalWidth = 0;
     this.paused = true;
+    this.playCalls = 0;
+    this.pauseCalls = 0;
+    this.loadCalls = 0;
+    this.playImpl = null;
     this.currentTime = 0;
     this.volume = 1;
     this.hidden = false;
+    this.rendered = true;
     this.isConnected = true;
     this.attributes = new Map();
     this.focusableChildren = [];
@@ -113,6 +124,7 @@ class FakeElement {
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.has(name) ? this.attributes.get(name) : null; }
   appendChild(child) { this.children.push(child); return child; }
+  getClientRects() { return this.rendered ? [{}] : []; }
   closest() { return null; }
   querySelector() { return null; }
   querySelectorAll() { return this.focusableChildren; }
@@ -120,9 +132,13 @@ class FakeElement {
   remove() { this.isConnected = false; }
   blur() {}
   focus() { if (this.onFocus) this.onFocus(this); }
-  load() {}
-  pause() { this.paused = true; }
-  play() { this.paused = false; return Promise.resolve(); }
+  load() { this.loadCalls += 1; }
+  pause() { this.pauseCalls += 1; this.paused = true; }
+  play() {
+    this.playCalls += 1;
+    this.paused = false;
+    return this.playImpl ? this.playImpl(this) : Promise.resolve();
+  }
 }
 
 function createStorage(initialStorage = {}, options = {}) {
@@ -183,6 +199,7 @@ function createRuntime(initialStorage = {}, options = {}) {
   const getElement = id => {
     if (!elements.has(id)) {
       const element = new FakeElement(id);
+      if (options.audioPlay) element.playImpl = audio => options.audioPlay(id, audio);
       element.onFocus = focused => { activeElement = focused; };
       elements.set(id, element);
     }
@@ -202,6 +219,7 @@ function createRuntime(initialStorage = {}, options = {}) {
 
   const document = {
     hidden: false,
+    get visibilityState() { return this.hidden ? "hidden" : "visible"; },
     get activeElement() { return activeElement; },
     getElementById: getElement,
     createElement: tag => new FakeElement(tag),
@@ -289,8 +307,13 @@ function createRuntime(initialStorage = {}, options = {}) {
       document.hidden = hidden;
       (documentListeners.get("visibilitychange") || []).forEach(listener => listener());
     },
-    triggerPageHide() {
-      (windowListeners.get("pagehide") || []).forEach(listener => listener());
+    triggerPageHide(persisted = false) {
+      const event = { persisted };
+      (windowListeners.get("pagehide") || []).forEach(listener => listener(event));
+    },
+    triggerPageShow(persisted = false) {
+      const event = { persisted };
+      (windowListeners.get("pageshow") || []).forEach(listener => listener(event));
     },
     triggerStorage(key, newValue, oldValue = null) {
       const event = { key, newValue, oldValue, storageArea: localStorage };
@@ -326,6 +349,10 @@ function createRuntime(initialStorage = {}, options = {}) {
     },
     intervalCount(delay) {
       return [...intervals.values()].filter(timer => typeof delay === "undefined" || timer.delay === delay).length;
+    },
+    listenerCount(target, type) {
+      const listeners = target === "document" ? documentListeners : windowListeners;
+      return (listeners.get(type) || []).length;
     },
     timeoutCount(delay) {
       return [...timeouts.values()].filter(timer => typeof delay === "undefined" || timer.delay === delay).length;
@@ -3223,6 +3250,170 @@ test("R2 D: short-landscape CSS uses a bounded two-column play layout without ch
   }
 });
 
+test("10D A/B: reduced-motion query targets decorative, feedback, roulette, and control motion", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const marker = css.lastIndexOf("/* Stage 10D reduced-motion accessibility */");
+  assert.ok(marker > css.lastIndexOf("/* R2 short-landscape gameplay containment */"));
+  const reduced = css.slice(marker);
+
+  assert.match(reduced, /@media \(prefers-reduced-motion: reduce\)\{/);
+  assert.match(reduced, /\.page,[\s\S]*?\.btn-stop,[\s\S]*?\.ans-input\.ok,[\s\S]*?\.ans-input\.ng,[\s\S]*?\.trophy-icon,[\s\S]*?\.new-badge,[\s\S]*?#page-result \.confetti-piece\{[\s\S]*?animation:none !important;/);
+  assert.match(reduced, /\.exam-chip\.spinning\{[\s\S]*?color:transparent !important;[\s\S]*?opacity:1 !important;/);
+  assert.match(reduced, /\.slot\.spinning \.slot-val\{[\s\S]*?animation:none !important;[\s\S]*?color:transparent !important;[\s\S]*?transform:none !important;/);
+  assert.match(reduced, /\.slot\.spinning \.slot-val::after\{[\s\S]*?content:"…";/);
+  assert.match(reduced, /#page-result \.confetti-layer\{[\s\S]*?display:none !important;/);
+  assert.match(reduced, /\.slider::before\{[\s\S]*?transition:none !important;/);
+});
+
+test("10D C: no-preference animation rules remain in production CSS and frozen geometry is untouched", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const marker = css.lastIndexOf("/* Stage 10D reduced-motion accessibility */");
+  const stage10eMarker = css.lastIndexOf("/* Stage 10E long-text and overflow resilience */");
+  assert.ok(stage10eMarker > marker);
+  const normal = css.slice(0, marker);
+  const reduced = css.slice(marker, stage10eMarker);
+
+  assert.match(normal, /\.page\{[^}]*animation:fadeUp \.35s ease;/);
+  assert.match(normal, /\.btn-stop\{[^}]*animation:stopPulse \.9s ease-in-out infinite alternate;/);
+  assert.match(normal, /\.slot\.spinning \.slot-val\{animation:spinText \.1s linear infinite;/);
+  assert.match(normal, /\.ans-input\.ng\{[^}]*animation:shake \.45s ease;/);
+  assert.match(normal, /#page-result \.confetti-piece\{[^}]*animation:confettiFall 3\.1s/);
+  assert.match(normal, /@keyframes (fadeUp|stopPulse|spinText|flashGreen|shake|bounceIn|badgePop|confettiFall)/);
+  assert.doesNotMatch(reduced, /#page-home|home-stage|btn-home-time|btn-home-practice|btn-home-wrong|btn-home-settings/);
+  assert.doesNotMatch(reduced, /max-width:700px|max-height:400px|orientation:landscape/);
+});
+
+test("10D D/J: manual STOP reveals the preselected question without changing gameplay timing", () => {
+  const runtime = createRuntime({}, { viewportWidth: 700 });
+  runtime.api.init();
+  assert.equal(runtime.api.startTimeMode(), true);
+  assert.equal(runtime.intervalCount(700), 1);
+  runtime.runInterval(700, 3);
+
+  const selected = runtime.api.state.curQuestion;
+  assert.ok(selected);
+  assert.equal(runtime.api.state.runPhase, "spin");
+  assert.equal(runtime.api.state.spinning, true);
+  assert.equal(runtime.api.state.spinIntervals.length, 4);
+  assert.equal(runtime.element("btn-stop").classList.contains("hidden"), false);
+
+  runtime.element("btn-stop").click();
+  assert.equal(runtime.api.state.runPhase, "answer");
+  assert.equal(runtime.api.state.spinning, false);
+  assert.equal(runtime.api.state.curQuestion, selected);
+  assert.equal(runtime.api.state.spinIntervals.length, 0);
+  assert.equal(runtime.element("btn-submit").classList.contains("hidden"), false);
+
+  runtime.element("ans").value = selected.answer;
+  runtime.element("btn-submit").click();
+  assert.equal(runtime.api.state.runPhase, "feedback");
+  assert.equal(runtime.api.state.correct, 1);
+  assert.equal(runtime.timeoutCount(850), 1);
+});
+
+test("Hotfix: roulette visual cycling is about 90% speed and the obsolete intro sentence is absent", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  assert.equal(runtime.api.startTimeMode(), true);
+  runtime.runInterval(700, 3);
+
+  assert.equal(runtime.intervalCount(106), 1);
+  assert.equal(runtime.intervalCount(117), 1);
+  assert.equal(runtime.intervalCount(128), 2);
+  assert.equal(runtime.intervalCount(95), 0);
+  assert.equal(runtime.intervalCount(105), 0);
+  assert.equal(runtime.intervalCount(115), 0);
+
+  const selected = runtime.api.state.curQuestion;
+  runtime.api.stopSpin();
+  assert.equal(runtime.api.state.runPhase, "answer");
+  assert.equal(runtime.api.state.curQuestion, selected);
+
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  assert.doesNotMatch(html, /완료시간이 같으면 정답률이 높은 기록이 우선합니다/);
+  assert.match(html, /전체 범위에서 문제가 무작위로 출제됩니다\./);
+  assert.match(html, /정답 10개를 맞히면 실전모드가 종료됩니다\./);
+  assert.match(html, /완료까지 걸린 플레이 시간이 기록됩니다\./);
+});
+
+test("10E A/B: long Korean and unbroken question text preserve answer, feedback, and STOP identity", () => {
+  const runtime = createRuntime({}, { viewportWidth: 700 });
+  runtime.api.init();
+  const base = runtime.api.QUESTION_SET[0];
+  const longKorean = "종자검사 규격을 확인하기 위한 매우 긴 한국어 질문 문장으로 괄호 안의 추가 설명과 숫자 123.45를 포함하고 여러 줄로 안전하게 표시되어야 합니다";
+  const unbroken = "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+  const question = {
+    ...base,
+    crop: longKorean,
+    item: unbroken
+  };
+
+  runtime.api.state.mode = "practice";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.api.state.runEnded = false;
+  runtime.api.state.spinning = true;
+  runtime.api.state.runPhase = "spin";
+  runtime.api.stopSpin();
+
+  assert.equal(runtime.api.state.curQuestion, question);
+  assert.equal(runtime.api.state.runPhase, "answer");
+  assert.match(runtime.element("q-text").innerHTML, new RegExp(longKorean));
+  assert.match(runtime.element("q-text").innerHTML, new RegExp(unbroken));
+  assert.equal(runtime.element("btn-submit").classList.contains("hidden"), false);
+
+  const feedback = runtime.api.formatFeedback(question, false, 0);
+  assert.match(feedback, new RegExp(unbroken));
+  assert.match(feedback, /오답!/);
+
+  const note = runtime.api.makeNoteItem(question);
+  assert.match(note.children[0].children[0].textContent, new RegExp(longKorean));
+  assert.match(note.children[0].children[1].textContent, new RegExp(unbroken));
+});
+
+test("10E C: targeted CSS wraps readable surfaces and bounds question, feedback, modal, and list overflow", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const marker = css.lastIndexOf("/* Stage 10E long-text and overflow resilience */");
+  assert.ok(marker > css.lastIndexOf("/* Stage 10D reduced-motion accessibility */"));
+  const stage10e = css.slice(marker);
+
+  assert.match(stage10e, /#page-play \.q-text\{[\s\S]*?overflow-x:hidden !important;[\s\S]*?overflow-y:auto !important;[\s\S]*?word-break:normal !important;/);
+  assert.match(stage10e, /#page-play \.feedback,[\s\S]*?#page-play \.feedback \.criteria\{[\s\S]*?overflow-wrap:anywhere;/);
+  assert.match(stage10e, /\.modal-window\{[\s\S]*?min-width:0;[\s\S]*?overflow-x:hidden;[\s\S]*?overflow-y:auto;/);
+  assert.match(stage10e, /\.modal-window \.btn-row,[\s\S]*?#page-result \.btn-row\{[\s\S]*?grid-template-columns:repeat\(2,minmax\(0,1fr\)\);/);
+  assert.match(stage10e, /\.note-item \.txt,[\s\S]*?\.note-item \.txt strong,[\s\S]*?\.note-item \.ans\{[\s\S]*?overflow-wrap:anywhere;/);
+  assert.match(stage10e, /@media \(max-width:700px\)\{[\s\S]*?#page-play \.answer-zone\.result-feedback \.feedback\{[\s\S]*?max-height:clamp\(72px,12svh,96px\) !important;[\s\S]*?overflow-y:auto !important;/);
+  assert.doesNotMatch(stage10e, /#page-home|home-stage|btn-home-/);
+  assert.doesNotMatch(stage10e, /prefers-reduced-motion|max-height:400px|orientation:landscape/);
+});
+
+test("10E D-K: frozen responsive, reduced-motion, roulette, and completion contracts remain present", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+  const r2Start = css.indexOf("/* R2 short-landscape gameplay containment */");
+  const reducedStart = css.indexOf("/* Stage 10D reduced-motion accessibility */");
+  const stage10eStart = css.indexOf("/* Stage 10E long-text and overflow resilience */");
+  const r2 = css.slice(r2Start, reducedStart);
+  const reduced = css.slice(reducedStart, stage10eStart);
+
+  assert.match(r2, /@media \(max-width:700px\) and \(max-height:400px\) and \(orientation:landscape\)\{/);
+  assert.match(r2, /grid-template-columns:minmax\(0,1fr\) minmax\(276px,44%\) !important;/);
+  assert.match(reduced, /@media \(prefers-reduced-motion: reduce\)\{/);
+  assert.match(reduced, /\.slot\.spinning \.slot-val::after\{[\s\S]*?content:"…";/);
+  assert.match(app, /}, 128\)\);/);
+  assert.match(app, /}, 106 \+ idx \* 11\)\);/);
+  assert.match(app, /const COMPLETION_TARGET = 10;/);
+
+  const mobile = createRuntime({}, { viewportWidth: 700 });
+  mobile.api.init();
+  mobile.api.startTimeMode();
+  mobile.runInterval(700, 3);
+  assert.equal(mobile.element("ans").readOnly, true);
+  mobile.resizeTo(701);
+  assert.equal(mobile.element("ans").readOnly, false);
+  assert.equal(mobile.element("mobile-keypad").classList.contains("hidden"), true);
+});
+
 test("R1D copy and namespace audit: active product code has no Completion15 contract", () => {
   const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
@@ -3230,4 +3421,861 @@ test("R1D copy and namespace audit: active product code has no Completion15 cont
   assert.doesNotMatch(html, /15문제|15개|15정답|0 \/ 15/);
   assert.match(app, /const COMPLETION_TARGET = 10;/);
   assert.match(html, /정답 10개를 맞히면 실전모드가 종료됩니다\./);
+});
+
+test("10F A/B/C: focus trap excludes hidden, CSS-hidden, and disabled controls", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.element("btn-home-settings").focus();
+  runtime.element("btn-home-settings").click();
+
+  runtime.element("btn-settings-save").disabled = true;
+  runtime.element("toggle-vibrate").rendered = false;
+  runtime.element("toggle-sfx").classList.add("hidden");
+  runtime.element("btn-settings-close").focus();
+  const shiftTab = runtime.triggerKeydown("Tab", { shiftKey: true });
+
+  assert.equal(shiftTab.defaultPrevented, true);
+  assert.equal(runtime.activeElement(), runtime.element("btn-bgm-up"));
+});
+
+test("10F D/E/F: modal and wrong-note list retain bounded vertical scrolling", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const stage10e = css.slice(css.lastIndexOf("/* Stage 10E long-text and overflow resilience */"));
+
+  assert.match(stage10e, /\.modal-window\{[\s\S]*?overflow-y:auto;/);
+  assert.match(stage10e, /#page-practice-setup \.setup-card\{[\s\S]*?flex-shrink:0;/);
+  assert.match(stage10e, /\.modal-window \.list-scroll\{[\s\S]*?min-height:0;[\s\S]*?overflow-y:auto;/);
+
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.state.wrongNotes = runtime.api.QUESTION_SET.slice(0, 12);
+  runtime.api.renderWrongPage();
+  assert.equal(runtime.element("wrong-total").textContent, "12");
+  assert.equal(runtime.element("wrong-list").children.length, 12);
+
+  const empty = createRuntime();
+  empty.api.init();
+  empty.api.renderWrongPage();
+  assert.match(empty.element("wrong-list").innerHTML, /아직 저장된 오답이 없어요/);
+});
+
+test("10F G/H/I: custom keypad and live-region semantics remain explicit", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+
+  assert.match(html, /id="mobile-keypad"[^>]*aria-label="숫자 키패드"/);
+  assert.match(html, /data-key="backspace"[^>]*aria-label="한 글자 지우기"/);
+  for (const digit of "0123456789") {
+    assert.match(html, new RegExp(`data-key="${digit}">${digit}<\\/button>`));
+  }
+  assert.match(html, /id="q-text"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  assert.match(html, /id="feedback"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  assert.doesNotMatch(html, /id="status-1-val"[^>]*aria-live/);
+  assert.doesNotMatch(html, /id="slot-(?:stage|crop|item)-val"[^>]*aria-live/);
+});
+
+function createBgmRuntime(level, options = {}) {
+  const seed = createRuntime();
+  return createRuntime({
+    [seed.api.STORAGE_KEYS.settings]: json({ bgmLevel: level, sfx: true, vibrate: true })
+  }, options);
+}
+
+function createDeferredAudioPlay() {
+  let resolve;
+  let reject;
+  const promise = new Promise((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
+  });
+  return {
+    promise,
+    resolvePlaying(audio) {
+      audio.paused = false;
+      resolve();
+    },
+    reject
+  };
+}
+
+async function flushAudioPromises() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+test("11A A: committed 0에서 draft 1 preview가 BGM play를 재개한다", async () => {
+  const runtime = createBgmRuntime(0);
+  runtime.api.init();
+  const home = runtime.element("bgm-home");
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  await flushAudioPromises();
+
+  assert.equal(runtime.api.state.settings.bgmLevel, 0);
+  assert.equal(runtime.api.state.settingsDraft.bgmLevel, 1);
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  assert.equal(home.playCalls, 1);
+  assert.equal(home.paused, false);
+  assert.equal(home.volume, 0.14);
+});
+
+test("11A B: 1 이상에서 draft 0 preview는 BGM을 정지한다", () => {
+  const runtime = createBgmRuntime(1);
+  runtime.api.init();
+  const home = runtime.element("bgm-home");
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-down").click();
+
+  assert.equal(runtime.api.state.settingsDraft.bgmLevel, 0);
+  assert.equal(runtime.api.state.currentBgm, null);
+  assert.equal(home.paused, true);
+  assert.equal(home.currentTime, 0);
+  assert.equal(home.volume, 0);
+});
+
+test("11A C: 0→1 preview 후 X, Escape, backdrop cancel은 committed 0으로 복구한다", async () => {
+  for (const closeMethod of ["x", "escape", "backdrop"]) {
+    const runtime = createBgmRuntime(0);
+    runtime.api.init();
+    const home = runtime.element("bgm-home");
+    runtime.element("btn-home-settings").click();
+    runtime.element("btn-bgm-up").click();
+    assert.equal(home.paused, false, closeMethod);
+
+    if (closeMethod === "x") runtime.element("btn-settings-close").click();
+    else if (closeMethod === "escape") runtime.triggerKeydown("Escape");
+    else runtime.element("page-settings").click();
+    await flushAudioPromises();
+
+    assert.equal(runtime.api.state.settingsDraft, null, closeMethod);
+    assert.equal(runtime.api.state.settings.bgmLevel, 0, closeMethod);
+    assert.equal(runtime.api.state.currentBgm, null, closeMethod);
+    assert.equal(home.paused, true, closeMethod);
+    assert.equal(home.volume, 0, closeMethod);
+  }
+});
+
+test("11A D: committed 2에서 draft 0 후 cancel하면 level 2 playback이 복구된다", async () => {
+  const runtime = createBgmRuntime(2);
+  runtime.api.init();
+  const home = runtime.element("bgm-home");
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-down").click();
+  runtime.element("btn-bgm-down").click();
+  assert.equal(home.paused, true);
+
+  runtime.element("btn-settings-close").click();
+  await flushAudioPromises();
+  assert.equal(runtime.api.state.settings.bgmLevel, 2);
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  assert.equal(home.paused, false);
+  assert.equal(home.volume, 0.26);
+});
+
+test("11A E: 0→1 및 2→4 Save는 최종 playback과 저장값을 유지한다", async () => {
+  const fromZero = createBgmRuntime(0);
+  fromZero.api.init();
+  fromZero.element("btn-home-settings").click();
+  fromZero.element("btn-bgm-up").click();
+  fromZero.element("btn-settings-save").click();
+  await flushAudioPromises();
+  assert.equal(fromZero.api.state.settings.bgmLevel, 1);
+  assert.equal(fromZero.element("bgm-home").paused, false);
+  assert.equal(JSON.parse(fromZero.raw(fromZero.api.STORAGE_KEYS.settings)).bgmLevel, 1);
+
+  const fromTwo = createBgmRuntime(2);
+  fromTwo.api.init();
+  const home = fromTwo.element("bgm-home");
+  home.currentTime = 12;
+  fromTwo.element("btn-home-settings").click();
+  fromTwo.element("btn-bgm-up").click();
+  fromTwo.element("btn-bgm-up").click();
+  fromTwo.element("btn-settings-save").click();
+  await flushAudioPromises();
+  assert.equal(fromTwo.api.state.settings.bgmLevel, 4);
+  assert.equal(home.paused, false);
+  assert.equal(home.volume, 0.55);
+  assert.equal(home.currentTime, 12);
+});
+
+test("11A F: rapid 0→1→0→2→0→3 변경은 마지막 draft와 playback에 수렴한다", async () => {
+  const runtime = createBgmRuntime(0);
+  runtime.api.init();
+  const home = runtime.element("bgm-home");
+  runtime.element("btn-home-settings").click();
+  for (const delta of [1, -1, 1, 1, -1, -1, 1, 1, 1]) {
+    runtime.element(delta > 0 ? "btn-bgm-up" : "btn-bgm-down").click();
+  }
+  await flushAudioPromises();
+
+  assert.equal(runtime.api.state.settingsDraft.bgmLevel, 3);
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  assert.equal(home.paused, false);
+  assert.equal(home.volume, 0.42);
+  assert.equal(home.playCalls, 3);
+});
+
+test("11A G: pause 뒤 stale play resolve는 desired level 0을 다시 재생시키지 않는다", async () => {
+  const pending = createDeferredAudioPlay();
+  const runtime = createBgmRuntime(0, {
+    audioPlay: id => id === "bgm-home" ? pending.promise : Promise.resolve()
+  });
+  runtime.api.init();
+  const home = runtime.element("bgm-home");
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("btn-bgm-down").click();
+  pending.resolvePlaying(home);
+  await flushAudioPromises();
+
+  assert.equal(runtime.api.state.settingsDraft.bgmLevel, 0);
+  assert.equal(runtime.api.state.currentBgm, null);
+  assert.equal(home.paused, true);
+});
+
+test("11A H: stale play rejection은 더 최신 playback 상태를 지우지 않는다", async () => {
+  const first = createDeferredAudioPlay();
+  const second = createDeferredAudioPlay();
+  const requests = [first, second];
+  const runtime = createBgmRuntime(0, {
+    audioPlay: id => id === "bgm-home" ? requests.shift().promise : Promise.resolve()
+  });
+  runtime.api.init();
+  const home = runtime.element("bgm-home");
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("btn-bgm-down").click();
+  runtime.element("btn-bgm-up").click();
+  first.reject(new Error("stale play rejection"));
+  await flushAudioPromises();
+
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  assert.equal(home.paused, false);
+  second.resolvePlaying(home);
+  await flushAudioPromises();
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  assert.equal(home.paused, false);
+});
+
+test("11A I: current play rejection은 처리되고 draft 설정을 강제로 0으로 바꾸지 않는다", async () => {
+  const pending = createDeferredAudioPlay();
+  const runtime = createBgmRuntime(0, {
+    audioPlay: id => id === "bgm-home" ? pending.promise : Promise.resolve()
+  });
+  runtime.api.init();
+  const home = runtime.element("bgm-home");
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  pending.reject(new Error("current play rejection"));
+  await flushAudioPromises();
+
+  assert.equal(runtime.api.state.settings.bgmLevel, 0);
+  assert.equal(runtime.api.state.settingsDraft.bgmLevel, 1);
+  assert.equal(runtime.api.state.currentBgm, null);
+  assert.equal(home.paused, true);
+  assert.equal(runtime.element("page-settings").classList.contains("active"), true);
+});
+
+test("11B A: active 5초 + hidden 30초 + active 5초는 10초만 누적한다", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+
+  runtime.advance(5000);
+  runtime.setHidden(true);
+  runtime.advance(30000);
+  runtime.setHidden(false);
+  runtime.advance(5000);
+
+  assert.equal(runtime.api.getElapsedSeconds(), 10);
+  assert.equal(runtime.api.state.elapsedMs, 5000);
+  assert.equal(runtime.api.state.stopwatchRunning, true);
+});
+
+test("11B B: repeated hidden/visible cycles accumulate only active segments", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+
+  for (let i = 0; i < 10; i += 1) {
+    runtime.advance(1000);
+    runtime.setHidden(true);
+    runtime.advance(30000);
+    runtime.setHidden(false);
+  }
+
+  assert.equal(runtime.api.getElapsedSeconds(), 10);
+  assert.equal(runtime.intervalCount(250), 1);
+});
+
+test("11B C: lifecycle pause preserves run identity, phase, question, and counters", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  runtime.api.stopSpin();
+  runtime.api.state.correct = 2;
+  runtime.api.state.wrong = 1;
+  runtime.api.state.tries = 3;
+  const before = {
+    runId: runtime.api.state.runId,
+    phase: runtime.api.state.runPhase,
+    question: runtime.api.state.curQuestion,
+    correct: runtime.api.state.correct,
+    tries: runtime.api.state.tries
+  };
+
+  runtime.setHidden(true);
+  runtime.advance(30000);
+  runtime.setHidden(false);
+
+  assert.equal(runtime.api.state.runId, before.runId);
+  assert.equal(runtime.api.state.runPhase, before.phase);
+  assert.equal(runtime.api.state.curQuestion, before.question);
+  assert.equal(runtime.api.state.correct, before.correct);
+  assert.equal(runtime.api.state.tries, before.tries);
+});
+
+test("11B D: lifecycle cycling never duplicates the stopwatch render interval or listeners", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+
+  for (let i = 0; i < 12; i += 1) {
+    runtime.setHidden(true);
+    assert.equal(runtime.intervalCount(250), 0);
+    runtime.setHidden(false);
+    assert.equal(runtime.intervalCount(250), 1);
+  }
+
+  assert.equal(runtime.listenerCount("document", "visibilitychange"), 1);
+  assert.equal(runtime.listenerCount("window", "pagehide"), 1);
+  assert.equal(runtime.listenerCount("window", "pageshow"), 1);
+});
+
+test("11B E: level 0 remains silent across visibility and BFCache lifecycle", async () => {
+  const runtime = createBgmRuntime(0);
+  runtime.api.init();
+  const bgms = ["bgm-home", "bgm-play", "bgm-play2"].map(id => runtime.element(id));
+
+  runtime.setHidden(true);
+  runtime.setHidden(false);
+  runtime.triggerPageHide(true);
+  runtime.triggerPageShow(true);
+  await flushAudioPromises();
+
+  assert.equal(bgms.reduce((sum, audio) => sum + audio.playCalls, 0), 0);
+  assert.equal(bgms.every(audio => audio.paused), true);
+  assert.equal(runtime.api.state.currentBgm, null);
+});
+
+test("11B F: positive BGM pauses in background and resumes in foreground", async () => {
+  const runtime = createBgmRuntime(2);
+  runtime.api.init();
+  await flushAudioPromises();
+  const home = runtime.element("bgm-home");
+  const beforePlayCalls = home.playCalls;
+
+  runtime.setHidden(true);
+  assert.equal(home.paused, true);
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  runtime.setHidden(false);
+  await flushAudioPromises();
+
+  assert.equal(home.paused, false);
+  assert.equal(home.playCalls, beforePlayCalls + 1);
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+});
+
+test("11B G: temporary lifecycle pause preserves BGM currentTime", async () => {
+  const runtime = createBgmRuntime(3);
+  runtime.api.init();
+  await flushAudioPromises();
+  const home = runtime.element("bgm-home");
+  home.currentTime = 37.5;
+
+  runtime.setHidden(true);
+  assert.equal(home.currentTime, 37.5);
+  runtime.advance(30000);
+  runtime.setHidden(false);
+  await flushAudioPromises();
+
+  assert.equal(home.currentTime, 37.5);
+  assert.equal(home.paused, false);
+});
+
+test("11B H: settings draft preview survives lifecycle and cancel/save keep transaction semantics", async () => {
+  const cancelled = createBgmRuntime(0);
+  cancelled.api.init();
+  cancelled.element("btn-home-settings").click();
+  cancelled.element("btn-bgm-up").click();
+  cancelled.element("btn-bgm-up").click();
+  cancelled.setHidden(true);
+  cancelled.setHidden(false);
+  await flushAudioPromises();
+  assert.equal(cancelled.api.state.settingsDraft.bgmLevel, 2);
+  assert.equal(cancelled.element("bgm-home").paused, false);
+  cancelled.triggerKeydown("Escape");
+  assert.equal(cancelled.api.state.settings.bgmLevel, 0);
+  assert.equal(cancelled.api.state.currentBgm, null);
+  assert.equal(JSON.parse(cancelled.raw(cancelled.api.STORAGE_KEYS.settings)).bgmLevel, 0);
+
+  const saved = createBgmRuntime(0);
+  saved.api.init();
+  saved.element("btn-home-settings").click();
+  saved.element("btn-bgm-up").click();
+  saved.element("btn-bgm-up").click();
+  saved.triggerPageHide(true);
+  saved.triggerPageShow(true);
+  saved.element("btn-settings-save").click();
+  await flushAudioPromises();
+  assert.equal(saved.api.state.settings.bgmLevel, 2);
+  assert.equal(saved.element("bgm-home").paused, false);
+  assert.equal(JSON.parse(saved.raw(saved.api.STORAGE_KEYS.settings)).bgmLevel, 2);
+});
+
+test("11B I: stale play settlement cannot override a newer visibility play request", async () => {
+  const staleResolve = createDeferredAudioPlay();
+  const latestResolve = createDeferredAudioPlay();
+  const resolveRequests = [staleResolve, latestResolve];
+  const resolved = createBgmRuntime(2, {
+    audioPlay: id => id === "bgm-home" ? resolveRequests.shift().promise : Promise.resolve()
+  });
+  resolved.api.init();
+  const resolvedHome = resolved.element("bgm-home");
+  resolved.setHidden(true);
+  staleResolve.resolvePlaying(resolvedHome);
+  await flushAudioPromises();
+  assert.equal(resolvedHome.paused, true);
+  resolved.setHidden(false);
+  latestResolve.resolvePlaying(resolvedHome);
+  await flushAudioPromises();
+  assert.equal(resolved.api.state.currentBgm, "bgm-home");
+  assert.equal(resolvedHome.paused, false);
+
+  const staleReject = createDeferredAudioPlay();
+  const latestAfterReject = createDeferredAudioPlay();
+  const rejectRequests = [staleReject, latestAfterReject];
+  const rejected = createBgmRuntime(2, {
+    audioPlay: id => id === "bgm-home" ? rejectRequests.shift().promise : Promise.resolve()
+  });
+  rejected.api.init();
+  const rejectedHome = rejected.element("bgm-home");
+  rejected.setHidden(true);
+  rejected.setHidden(false);
+  staleReject.reject(new Error("stale lifecycle rejection"));
+  await flushAudioPromises();
+  assert.equal(rejected.api.state.currentBgm, "bgm-home");
+  assert.equal(rejectedHome.paused, false);
+  latestAfterReject.resolvePlaying(rejectedHome);
+  await flushAudioPromises();
+  assert.equal(rejectedHome.paused, false);
+});
+
+test("11B J: pagehide closes the active segment and saves the owned checkpoint", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  runtime.api.stopSpin();
+  runtime.api.state.correct = 3;
+  runtime.api.state.wrong = 2;
+  runtime.api.state.tries = 5;
+  runtime.advance(4200);
+  const runId = runtime.api.state.runId;
+  const questionId = runtime.api.state.curQuestion.id;
+
+  runtime.triggerPageHide(false);
+  const saved = JSON.parse(runtime.raw(runtime.api.STORAGE_KEYS.inProgress));
+
+  assert.equal(saved.runId, runId);
+  assert.equal(saved.questionId, questionId);
+  assert.equal(saved.phase, "answer");
+  assert.equal(saved.correct, 3);
+  assert.equal(saved.tries, 5);
+  assert.equal(saved.elapsedMs, 4200);
+  assert.equal(runtime.api.state.stopwatchRunning, false);
+});
+
+test("11B K: BFCache pagehide/pageshow preserves runtime identity and resumes one active timer", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  runtime.api.stopSpin();
+  runtime.api.state.correct = 4;
+  runtime.api.state.wrong = 1;
+  runtime.api.state.tries = 5;
+  runtime.advance(6000);
+  const before = {
+    runId: runtime.api.state.runId,
+    question: runtime.api.state.curQuestion,
+    phase: runtime.api.state.runPhase
+  };
+
+  runtime.triggerPageHide(true);
+  runtime.advance(30000);
+  runtime.triggerPageShow(true);
+
+  assert.equal(runtime.api.state.runId, before.runId);
+  assert.equal(runtime.api.state.curQuestion, before.question);
+  assert.equal(runtime.api.state.runPhase, before.phase);
+  assert.equal(runtime.api.state.correct, 4);
+  assert.equal(runtime.api.state.tries, 5);
+  assert.equal(runtime.api.getElapsedSeconds(), 6);
+  assert.equal(runtime.api.state.stopwatchRunning, true);
+  assert.equal(runtime.intervalCount(250), 1);
+});
+
+test("11B L: repeated BFCache restore does not re-init or duplicate listeners", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  const runId = runtime.api.state.runId;
+
+  for (let i = 0; i < 10; i += 1) {
+    runtime.triggerPageHide(true);
+    runtime.advance(10000);
+    runtime.triggerPageShow(true);
+  }
+
+  assert.equal(runtime.api.state.runId, runId);
+  assert.equal(runtime.element("page-play").classList.contains("active"), true);
+  assert.equal(runtime.intervalCount(250), 1);
+  assert.equal(runtime.listenerCount("document", "visibilitychange"), 1);
+  assert.equal(runtime.listenerCount("window", "pagehide"), 1);
+  assert.equal(runtime.listenerCount("window", "pageshow"), 1);
+});
+
+test("11B M: terminal result elapsed stays frozen through visibility and BFCache events", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET[0];
+  runtime.api.state.mode = "time";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.api.state.runId = "terminal-lifecycle-run";
+  runtime.api.state.correct = 9;
+  runtime.api.state.wrong = 2;
+  runtime.api.state.tries = 11;
+  runtime.api.state.runEnded = false;
+  runtime.api.state.scored = false;
+  runtime.api.startStopwatch();
+  runtime.advance(12750);
+  runtime.element("ans").value = question.answer;
+  runtime.api.evaluateAnswer();
+  const elapsed = runtime.api.state.completionElapsedSeconds;
+  const result = runtime.api.state.resultCompletionRecord;
+
+  runtime.setHidden(true);
+  runtime.advance(30000);
+  runtime.setHidden(false);
+  runtime.triggerPageHide(true);
+  runtime.advance(30000);
+  runtime.triggerPageShow(true);
+
+  assert.equal(runtime.api.state.completionElapsedSeconds, elapsed);
+  assert.equal(runtime.api.getElapsedSeconds(), elapsed);
+  assert.equal(runtime.api.state.resultCompletionRecord, result);
+  assert.equal(runtime.api.state.stopwatchStarted, false);
+  assert.equal(runtime.intervalCount(250), 0);
+  assert.equal(runtime.raw(runtime.api.STORAGE_KEYS.inProgress), undefined);
+});
+
+test("11B N: lifecycle checkpoint writes never overwrite a foreign run owner", () => {
+  const seed = createRuntime();
+  const storage = createStorage();
+  const runtime = createRuntime({}, { localStorage: storage });
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  const foreign = makeCheckpoint(seed, {
+    runId: "foreign-lifecycle-run",
+    correct: 5,
+    wrong: 2,
+    tries: 7,
+    phase: "answer"
+  });
+  const foreignRaw = json(foreign);
+  storage.setRaw(seed.api.STORAGE_KEYS.inProgress, foreignRaw);
+
+  runtime.setHidden(true);
+  runtime.setHidden(false);
+  runtime.triggerPageHide(true);
+  runtime.triggerPageShow(true);
+
+  assert.equal(storage.raw(seed.api.STORAGE_KEYS.inProgress), foreignRaw);
+  assert.notEqual(runtime.api.state.runId, foreign.runId);
+});
+
+test("11B O: HOME lifecycle restores only home BGM and never creates gameplay state", async () => {
+  const runtime = createBgmRuntime(2);
+  runtime.api.init();
+  await flushAudioPromises();
+  runtime.setHidden(true);
+  runtime.advance(30000);
+  runtime.setHidden(false);
+  runtime.triggerPageHide(true);
+  runtime.triggerPageShow(true);
+  await flushAudioPromises();
+
+  assert.equal(runtime.element("page-home").classList.contains("active"), true);
+  assert.equal(runtime.api.state.mode, null);
+  assert.equal(runtime.api.state.runId, null);
+  assert.equal(runtime.api.state.curQuestion, null);
+  assert.equal(runtime.api.state.stopwatchStarted, false);
+  assert.equal(runtime.intervalCount(250), 0);
+  assert.equal(runtime.raw(runtime.api.STORAGE_KEYS.inProgress), undefined);
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  assert.equal(runtime.element("bgm-home").paused, false);
+});
+
+test("11B P: countdown lifecycle keeps one countdown and does not start elapsed early", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  const runId = runtime.api.state.runId;
+
+  runtime.setHidden(true);
+  runtime.advance(30000);
+  runtime.setHidden(false);
+  runtime.triggerPageHide(true);
+  runtime.triggerPageShow(true);
+
+  assert.equal(runtime.api.state.runId, runId);
+  assert.equal(runtime.api.state.runPhase, "countdown");
+  assert.equal(runtime.api.state.curQuestion, null);
+  assert.equal(runtime.api.state.stopwatchStarted, false);
+  assert.equal(runtime.api.getElapsedSeconds(), 0);
+  assert.equal(runtime.intervalCount(700), 1);
+  assert.equal(runtime.intervalCount(250), 0);
+});
+
+test("11B Q: a feedback timeout that fires while hidden returns to one valid next round", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  runtime.api.stopSpin();
+  const runId = runtime.api.state.runId;
+  runtime.element("ans").value = runtime.api.state.curQuestion.answer;
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.api.state.runPhase, "feedback");
+  assert.equal(runtime.timeoutCount(850), 1);
+
+  runtime.setHidden(true);
+  runtime.runTimeout(850);
+  assert.equal(runtime.api.state.runPhase, "spin");
+  assert.equal(runtime.api.state.runId, runId);
+  assert.equal(runtime.timeoutCount(850), 0);
+  assert.equal(runtime.intervalCount(128), 2);
+  assert.equal(runtime.intervalCount(106), 1);
+  assert.equal(runtime.intervalCount(117), 1);
+  runtime.setHidden(false);
+
+  assert.equal(runtime.api.state.stopwatchRunning, true);
+  assert.equal(runtime.intervalCount(250), 1);
+});
+
+test("11B R: non-BFCache pagehide persists a v3 checkpoint for normal reload/resume", () => {
+  const storage = createStorage();
+  const first = createRuntime({}, { localStorage: storage });
+  first.api.init();
+  first.api.startTimeMode();
+  first.runInterval(700, 3);
+  first.api.stopSpin();
+  first.api.state.correct = 6;
+  first.api.state.wrong = 2;
+  first.api.state.tries = 8;
+  first.advance(7300);
+  const runId = first.api.state.runId;
+  const questionId = first.api.state.curQuestion.id;
+  first.triggerPageHide(false);
+
+  const second = createRuntime({}, { localStorage: storage });
+  second.api.init();
+  assert.equal(second.api.state.timeCheckpoint.version, 3);
+  assert.equal(second.api.state.timeCheckpoint.runId, runId);
+  assert.equal(second.api.resumeTimeMode(), true);
+  assert.equal(second.api.state.runId, runId);
+  assert.equal(second.api.state.curQuestion.id, questionId);
+  assert.equal(second.api.state.correct, 6);
+  assert.equal(second.api.state.tries, 8);
+  assert.equal(second.api.getElapsedSeconds(), 7);
+});
+
+test("11C A: production preload policy keeps HOME/SFX eager and gameplay BGM intent-loaded", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  const expected = {
+    "bgm-home": "auto",
+    "bgm-play": "none",
+    "bgm-play2": "none",
+    "se-correct": "auto",
+    "se-wrong": "auto",
+    "se-finish": "auto"
+  };
+  Object.entries(expected).forEach(([id, preload]) => {
+    const tag = html.match(new RegExp(`<audio\\s+id="${id}"[^>]*>`))?.[0] || "";
+    assert.match(tag, new RegExp(`\\bpreload="${preload}"`), id);
+  });
+
+  const time = createBgmRuntime(3);
+  time.api.init();
+  assert.equal(["bgm-home", "bgm-play", "bgm-play2", "se-correct", "se-wrong", "se-finish"]
+    .reduce((sum, id) => sum + time.element(id).loadCalls, 0), 0);
+  time.element("btn-home-time").click();
+  assert.equal(time.element("bgm-play").loadCalls, 1);
+  assert.equal(time.element("bgm-play2").loadCalls, 0);
+
+  const practice = createBgmRuntime(3);
+  practice.api.init();
+  practice.element("btn-home-practice").click();
+  assert.equal(practice.element("bgm-play").loadCalls, 0);
+  assert.equal(practice.element("bgm-play2").loadCalls, 1);
+
+  const wrongPractice = createBgmRuntime(3);
+  wrongPractice.api.init();
+  wrongPractice.element("btn-wrong-practice").click();
+  assert.equal(wrongPractice.element("bgm-play2").loadCalls, 1);
+
+  const muted = createBgmRuntime(0);
+  muted.api.init();
+  muted.element("btn-home-time").click();
+  muted.element("btn-home-practice").click();
+  assert.equal(muted.element("bgm-play").loadCalls, 0);
+  assert.equal(muted.element("bgm-play2").loadCalls, 0);
+});
+
+test("11C B: all six production audio src values are unchanged", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  const expected = {
+    "bgm-home": "audio/bgm_home.mp3",
+    "bgm-play": "audio/bgm_play.mp3",
+    "bgm-play2": "audio/bgm_play2.mp3",
+    "se-correct": "audio/se_correct.wav",
+    "se-wrong": "audio/se_wrong.wav",
+    "se-finish": "audio/se_finish.wav"
+  };
+  Object.entries(expected).forEach(([id, src]) => {
+    const tag = html.match(new RegExp(`<audio\\s+id="${id}"[^>]*>`))?.[0] || "";
+    assert.match(tag, new RegExp(`\\bsrc="${src.replaceAll(".", "\\.")}"`), id);
+  });
+});
+
+test("11C C: the three BGM elements remain looped and SFX remain non-looping", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  ["bgm-home", "bgm-play", "bgm-play2"].forEach(id => {
+    const tag = html.match(new RegExp(`<audio\\s+id="${id}"[^>]*>`))?.[0] || "";
+    assert.match(tag, /\sloop(?:\s|>)/, id);
+  });
+  ["se-correct", "se-wrong", "se-finish"].forEach(id => {
+    const tag = html.match(new RegExp(`<audio\\s+id="${id}"[^>]*>`))?.[0] || "";
+    assert.doesNotMatch(tag, /\sloop(?:\s|>)/, id);
+  });
+});
+
+test("11C D: no production audio element enables autoplay", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  const tags = [...html.matchAll(/<audio\b[^>]*>/g)].map(match => match[0]);
+  assert.equal(tags.length, 6);
+  tags.forEach(tag => assert.doesNotMatch(tag, /\bautoplay\b/));
+});
+
+test("11C E: lazy gameplay policy preserves Stage 11A committed 0 to draft 1 preview", async () => {
+  const runtime = createBgmRuntime(0);
+  runtime.api.init();
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  await flushAudioPromises();
+  assert.equal(runtime.api.state.settings.bgmLevel, 0);
+  assert.equal(runtime.api.state.settingsDraft.bgmLevel, 1);
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  assert.equal(runtime.element("bgm-home").paused, false);
+});
+
+test("11C F: lazy policy preserves Stage 11A stale play rejection protection", async () => {
+  const first = createDeferredAudioPlay();
+  const second = createDeferredAudioPlay();
+  const requests = [first, second];
+  const runtime = createBgmRuntime(0, {
+    audioPlay: id => id === "bgm-home" ? requests.shift().promise : Promise.resolve()
+  });
+  runtime.api.init();
+  runtime.element("btn-home-settings").click();
+  runtime.element("btn-bgm-up").click();
+  runtime.element("btn-bgm-down").click();
+  runtime.element("btn-bgm-up").click();
+  first.reject(new Error("stale lazy-load rejection"));
+  await flushAudioPromises();
+  assert.equal(runtime.api.state.currentBgm, "bgm-home");
+  assert.equal(runtime.element("bgm-home").paused, false);
+  second.resolvePlaying(runtime.element("bgm-home"));
+  await flushAudioPromises();
+  assert.equal(runtime.element("bgm-home").paused, false);
+});
+
+test("11C G: lazy policy preserves Stage 11B pause position and visible resume", async () => {
+  const runtime = createBgmRuntime(2);
+  runtime.api.init();
+  await flushAudioPromises();
+  const home = runtime.element("bgm-home");
+  home.currentTime = 24.5;
+  runtime.setHidden(true);
+  assert.equal(home.paused, true);
+  assert.equal(home.currentTime, 24.5);
+  runtime.setHidden(false);
+  await flushAudioPromises();
+  assert.equal(home.paused, false);
+  assert.equal(home.currentTime, 24.5);
+});
+
+test("11C H: manual STOP still reveals the preselected target", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  const target = runtime.api.state.curQuestion;
+  runtime.api.stopSpin();
+  assert.equal(runtime.api.state.curQuestion, target);
+  assert.equal(runtime.api.state.runPhase, "answer");
+  assert.equal(runtime.api.state.spinning, false);
+});
+
+test("11C I: the tenth correct answer remains the completion target", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  const question = runtime.api.QUESTION_SET[0];
+  runtime.api.state.mode = "time";
+  runtime.api.state.pool = [question];
+  runtime.api.state.curQuestion = question;
+  runtime.api.state.runId = "stage11c-target";
+  runtime.api.state.correct = 9;
+  runtime.api.state.wrong = 2;
+  runtime.api.state.tries = 11;
+  runtime.api.state.runEnded = false;
+  runtime.api.state.scored = false;
+  runtime.api.startStopwatch();
+  runtime.element("ans").value = question.answer;
+  runtime.api.evaluateAnswer();
+  assert.equal(runtime.api.COMPLETION_TARGET, 10);
+  assert.equal(runtime.api.state.correct, 10);
+  assert.equal(runtime.api.state.runEnded, true);
+  assert.equal(runtime.element("page-result").classList.contains("active"), true);
+});
+
+test("11C J: roulette hotfix intervals remain 128, 106, 117, and 128 milliseconds", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.api.startTimeMode();
+  runtime.runInterval(700, 3);
+  assert.equal(runtime.intervalCount(106), 1);
+  assert.equal(runtime.intervalCount(117), 1);
+  assert.equal(runtime.intervalCount(128), 2);
+  assert.equal(runtime.intervalCount(95), 0);
+  assert.equal(runtime.intervalCount(105), 0);
+  assert.equal(runtime.intervalCount(115), 0);
 });
