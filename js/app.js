@@ -966,7 +966,7 @@ function validatePracticeSelection() {
     $("setup-note").classList.add("error");
     return false;
   }
-  $("setup-note").textContent = "선택한 범위 안에서 무제한으로 반복 출제됩니다.";
+  $("setup-note").textContent = "선택 범위에서 무제한 반복 출제됩니다.";
   $("setup-note").classList.remove("error");
   state.selectedExamTypes = selectedExamTypes;
   state.selectedStageGroups = selectedStageGroups;
@@ -1379,6 +1379,33 @@ function getQuestionWeight(q) {
   return Math.max(0.1, getStageWeight(q.stage) * getCropWeight(q.crop));
 }
 
+function hasExactSelection(selected, allOptions) {
+  if (!Array.isArray(selected) || !Array.isArray(allOptions)) return false;
+  if (selected.length !== allOptions.length) return false;
+  const selectedSet = new Set(selected);
+  if (selectedSet.size !== selected.length) return false;
+  return allOptions.every(option => selectedSet.has(option));
+}
+
+function isFullPracticeSelection() {
+  return (
+    hasExactSelection(state.selectedExamTypes, EXAM_TYPES) &&
+    hasExactSelection(state.selectedStageGroups, STAGE_GROUPS) &&
+    hasExactSelection(state.selectedCrops, CROPS)
+  );
+}
+
+function getSamplingPolicy() {
+  if (state.mode === "wrong-practice") return "uniform";
+  if (state.mode === "practice") return isFullPracticeSelection() ? "weighted" : "uniform";
+  return "weighted";
+}
+
+function uniformPick(source) {
+  if (!Array.isArray(source) || source.length === 0) return null;
+  return source[Math.floor(Math.random() * source.length)];
+}
+
 function weightedPick(source) {
   const total = source.reduce((sum, q) => sum + getQuestionWeight(q), 0);
   if (!Number.isFinite(total) || total <= 0) return source[Math.floor(Math.random() * source.length)];
@@ -1394,7 +1421,7 @@ function pickQuestion() {
   if (!state.pool.length) return null;
   const candidates = state.pool.filter(q => !state.curQuestion || q.id !== state.curQuestion.id);
   const source = candidates.length ? candidates : state.pool;
-  return weightedPick(source);
+  return getSamplingPolicy() === "uniform" ? uniformPick(source) : weightedPick(source);
 }
 
 function setMobileControlsActive(active, mode = "submit") {

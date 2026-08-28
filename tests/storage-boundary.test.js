@@ -12,6 +12,9 @@ globalThis.__storageTest = {
   COMPLETION_TARGET,
   TIME_CHECKPOINT_VERSION,
   QUESTION_SET,
+  EXAM_TYPES,
+  CROPS,
+  STAGE_GROUPS,
   state,
   init,
   loadSettings,
@@ -40,8 +43,13 @@ globalThis.__storageTest = {
   handleStorageChange,
   normalizeTimeCheckpoint,
   isValidTimeCheckpoint,
+  hasExactSelection,
+  isFullPracticeSelection,
+  getSamplingPolicy,
+  uniformPick,
   weightedPick,
   pickQuestion,
+  startRound,
   stopSpin,
   handleQuitPlay,
   saveSettings,
@@ -253,6 +261,8 @@ function createRuntime(initialStorage = {}, options = {}) {
   };
 
   const localStorage = options.localStorage || createStorage(initialStorage, options);
+  const runtimeMath = Object.create(Math);
+  runtimeMath.random = typeof options.random === "function" ? options.random : Math.random.bind(Math);
 
   const context = vm.createContext({
     console,
@@ -275,7 +285,7 @@ function createRuntime(initialStorage = {}, options = {}) {
     },
     confirm: () => options.confirmResult !== false,
     alert() {},
-    Math,
+    Math: runtimeMath,
     Date,
     performance: { now: () => nowMs },
     Promise,
@@ -4278,4 +4288,425 @@ test("11C J: roulette hotfix intervals remain 128, 106, 117, and 128 millisecond
   assert.equal(runtime.intervalCount(95), 0);
   assert.equal(runtime.intervalCount(105), 0);
   assert.equal(runtime.intervalCount(115), 0);
+});
+
+test("visual hotfix A-C: HOME blur fills the viewport without changing Stage 7 geometry or hitboxes", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const stage7Start = css.indexOf("/* Stage 7 home coordinate-system stabilization */");
+  const stage7End = css.indexOf("/* Stage 10C safe-area and touch-target stabilization */");
+  const stage7 = css.slice(stage7Start, stage7End);
+  const hotfix = css.slice(css.lastIndexOf("/* Final HOME letterbox hotfix */"), css.lastIndexOf("/* R2 short-landscape gameplay containment */"));
+
+  assert.match(stage7, /width:min\(100vw,calc\(\(100dvh - 1px\) \* 941 \/ 1672\)\) !important;/);
+  assert.match(stage7, /aspect-ratio:941 \/ 1672 !important;/);
+  assert.match(stage7, /object-fit:contain !important;/);
+  assert.match(stage7, /#page-home #btn-home-time\{top:60\.15% !important;\}/);
+  assert.match(stage7, /#page-home #btn-home-practice\{top:71\.41% !important;\}/);
+  assert.match(stage7, /#page-home #btn-home-wrong\{left:17% !important;\}/);
+  assert.match(stage7, /#page-home #btn-home-settings\{left:52% !important;\}/);
+  assert.match(hotfix, /#page-home\.image-home-page::after\{/);
+  assert.match(hotfix, /background-size:cover;/);
+  assert.match(hotfix, /filter:blur\(30px\) brightness\(\.52\) saturate\(\.88\);/);
+  assert.doesNotMatch(hotfix, /#page-home \.home-stage|#page-home #btn-home-(?:time|practice|wrong|settings)/);
+});
+
+test("visual hotfix D-H: portrait STOP compacts independently while answer and landscape contracts remain", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final real-device layout hotfix */"));
+
+  assert.match(hotfix, /@media \(max-width:700px\) and \(orientation:portrait\)/);
+  assert.match(hotfix, /\.play-flow:has\(\.answer-zone\.mode-stop\)/);
+  assert.match(hotfix, /grid-template-rows:auto auto clamp\(72px,9\.7svh,94px\) auto !important;/);
+  assert.match(hotfix, /#page-play \.answer-zone\.mode-stop\{[\s\S]*?height:auto !important;[\s\S]*?min-height:0 !important;/);
+  assert.match(hotfix, /@media \(max-width:700px\) and \(min-height:641px\) and \(orientation:portrait\)/);
+  assert.doesNotMatch(hotfix, /\.answer-zone\.mode-submit|\.answer-zone\.result-feedback/);
+  assert.match(css, /@media \(max-width:700px\) and \(max-height:400px\) and \(orientation:landscape\)/);
+  assert.match(css, /grid-template-columns:minmax\(0,1fr\) minmax\(276px,44%\) !important;/);
+  assert.match(css, /@media \(min-width:701px\)/);
+});
+
+test("visual hotfix I-K: mini stats are label/value only while accuracy and best accuracy remain", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  const mini = html.match(/<div class="result-mini-grid">([\s\S]*?)<div class="wrong-panel panel result-wrong-panel">/)?.[1] || "";
+
+  assert.equal((mini.match(/class="stat-card"/g) || []).length, 4);
+  assert.equal((mini.match(/class="sc-lbl"/g) || []).length, 4);
+  assert.equal((mini.match(/class="sc-val"/g) || []).length, 4);
+  assert.doesNotMatch(mini, /class="sc-sub"/);
+  assert.match(mini, /id="r-acc">0%<\/div>/);
+  assert.match(html, /최고 기록: <span id="r-best">기록 없음<\/span>/);
+});
+
+test("visual hotfix L-M: result wrong list owns internal scrolling and actions remain outside it", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final real-device layout hotfix */"));
+  const panelEnd = html.indexOf("</div>\n\n    <div class=\"btn-row equal\">", html.indexOf("result-wrong-panel"));
+  const panel = html.slice(html.indexOf("result-wrong-panel"), panelEnd);
+
+  assert.match(hotfix, /grid-template-rows:auto auto auto minmax\(96px,1fr\) auto !important;/);
+  assert.match(hotfix, /#page-result \.result-wrong-panel \.list-scroll\{[\s\S]*?min-height:0 !important;[\s\S]*?overflow-y:auto !important;/);
+  assert.match(panel, /id="result-wrong-list"/);
+  assert.doesNotMatch(panel, /btn-result-retry|btn-result-home/);
+  assert.ok(html.indexOf("btn-result-retry") > html.indexOf("result-wrong-list"));
+  assert.match(hotfix, /overflow-x:hidden !important;/);
+});
+
+test("visual hotfix N: Stage 10E long-text containment remains active", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const stage10e = css.slice(css.lastIndexOf("/* Stage 10E long-text and overflow resilience */"), css.lastIndexOf("/* Final real-device layout hotfix */"));
+
+  assert.match(stage10e, /overflow-wrap:anywhere;/);
+  assert.match(stage10e, /#page-play \.q-text\{[\s\S]*?overflow-x:hidden !important;[\s\S]*?overflow-y:auto !important;/);
+  assert.match(stage10e, /\.note-item \.txt,[\s\S]*?\.note-item \.ans\{[\s\S]*?overflow-wrap:anywhere;/);
+});
+
+test("PLAY anchor A-B: tall portrait STOP, answer, and feedback share one top-anchor offset", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const anchor = css.slice(css.lastIndexOf("/* Final PLAY phase anchor hotfix */"), css.lastIndexOf("/* Final real-device layout hotfix */"));
+  const stop = css.slice(css.lastIndexOf("/* Final real-device layout hotfix */"));
+
+  assert.match(anchor, /@media \(max-width:700px\) and \(min-height:700px\) and \(orientation:portrait\)/);
+  assert.match(anchor, /\.play-flow:has\(\.answer-zone\.mode-submit\)\{[\s\S]*?padding-top:clamp\(14px,6svh,52px\);/);
+  assert.match(stop, /\.play-flow:has\(\.answer-zone\.mode-stop\)\{[\s\S]*?padding-top:clamp\(14px,6svh,52px\);/);
+  assert.match(css, /#page-play \.answer-zone\.result-feedback \.feedback\{/);
+});
+
+test("PLAY anchor C-D: keypad sizing stays intact and short portrait keeps compact priority", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const anchor = css.slice(css.lastIndexOf("/* Final PLAY phase anchor hotfix */"), css.lastIndexOf("/* Final real-device layout hotfix */"));
+
+  assert.match(anchor, /@media \(max-width:700px\) and \(min-height:641px\) and \(max-height:699px\) and \(orientation:portrait\)/);
+  assert.match(anchor, /\.mode-submit:not\(\.result-feedback\)/);
+  assert.match(anchor, /padding-top:8px;/);
+  assert.doesNotMatch(anchor, /keypad-btn|mobile-keypad|font-size|height:var\(--answer-zone-h\)/);
+  assert.match(css, /@media \(max-width:700px\) and \(max-height:640px\)\{[\s\S]*?--answer-zone-h:284px !important;/);
+  assert.match(css, /@media \(max-width:700px\) and \(max-height:620px\)\{[\s\S]*?--answer-zone-h:268px !important;/);
+});
+
+test("PLAY anchor E: the new phase rule is portrait-only and leaves the R2 boundary intact", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const anchor = css.slice(css.lastIndexOf("/* Final PLAY phase anchor hotfix */"), css.lastIndexOf("/* Final real-device layout hotfix */"));
+  const r2 = css.slice(css.lastIndexOf("/* R2 short-landscape gameplay containment */"), css.lastIndexOf("/* Stage 10D reduced-motion accessibility */"));
+
+  assert.doesNotMatch(anchor, /orientation:landscape|min-width:701px/);
+  assert.match(r2, /@media \(max-width:700px\) and \(max-height:400px\) and \(orientation:landscape\)/);
+  assert.match(r2, /grid-template-columns:minmax\(0,1fr\) minmax\(276px,44%\) !important;/);
+});
+
+test("PLAY anchor F-G: HOME and RESULT final hotfix contracts remain separate and unchanged", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const anchor = css.slice(css.lastIndexOf("/* Final PLAY phase anchor hotfix */"), css.lastIndexOf("/* Final real-device layout hotfix */"));
+  const home = css.slice(css.lastIndexOf("/* Final HOME letterbox hotfix */"), css.lastIndexOf("/* R2 short-landscape gameplay containment */"));
+  const result = css.slice(css.lastIndexOf("/* Final real-device layout hotfix */"));
+
+  assert.doesNotMatch(anchor, /#page-home|#page-result|result-layout|result-wrong-panel/);
+  assert.match(home, /filter:blur\(30px\) brightness\(\.52\) saturate\(\.88\);/);
+  assert.match(result, /grid-template-rows:auto auto auto minmax\(96px,1fr\) auto !important;/);
+  assert.match(result, /#page-result \.result-wrong-panel \.list-scroll\{[\s\S]*?overflow-y:auto !important;/);
+});
+
+test("final UI A-B: PLAY mode pill aligns to the existing 44px HOME touch target", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+
+  assert.match(hotfix, /@media \(max-width:700px\)\{/);
+  assert.match(hotfix, /#page-play #play-mode-pill,[\s\S]*?#page-play #btn-play-home\{[\s\S]*?height:44px !important;[\s\S]*?min-height:44px !important;/);
+  assert.match(hotfix, /align-self:flex-start;/);
+  assert.doesNotMatch(hotfix, /mode-title|play-flow|answer-zone|font-size/);
+});
+
+test("final UI C-E: practice CTA is a normal-flow footer beside the scrollable setup content", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+  const practice = html.match(/<section id="page-practice-setup"[\s\S]*?<section id="page-play"/)?.[0] || "";
+
+  assert.match(hotfix, /#page-practice-setup \.modal-window\{[\s\S]*?overflow-y:hidden;/);
+  assert.match(hotfix, /#page-practice-setup \.setup-card\{[\s\S]*?flex:1 1 auto;[\s\S]*?min-height:0;[\s\S]*?overflow-y:auto;/);
+  assert.match(hotfix, /#page-practice-setup \.setup-actions\{[\s\S]*?position:static;[\s\S]*?flex-shrink:0;/);
+  assert.match(practice, /id="examtype-grid"/);
+  assert.match(practice, /id="stage-grid"/);
+  assert.match(practice, /id="crop-grid"/);
+  assert.match(practice, /id="setup-note"/);
+  assert.match(practice, /id="btn-practice-start"/);
+});
+
+test("final UI F-G: modal focus and PLAY phase-anchor contracts remain unchanged", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const app = fs.readFileSync(path.join(ROOT, "js", "app.js"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+
+  assert.match(app, /function handleModalKeydown\(e\)/);
+  assert.match(app, /function closeModal\(id, \{ restoreFocus = true \} = \{\}\)/);
+  assert.match(app, /modalOpeners\.get\(modal\)/);
+  assert.match(css, /\.play-flow:has\(\.answer-zone\.mode-stop\)\{[\s\S]*?padding-top:clamp\(14px,6svh,52px\);/);
+  assert.match(css, /\.play-flow:has\(\.answer-zone\.mode-submit\)\{[\s\S]*?padding-top:clamp\(14px,6svh,52px\);/);
+  assert.doesNotMatch(hotfix, /position:(?:fixed|absolute)|transform:|keypad-btn/);
+});
+
+test("final UI H: HOME, RESULT, R2, reduced-motion, and long-text hotfixes stay intact", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+
+  assert.match(css, /filter:blur\(30px\) brightness\(\.52\) saturate\(\.88\);/);
+  assert.match(css, /grid-template-rows:auto auto auto minmax\(96px,1fr\) auto !important;/);
+  assert.match(css, /@media \(max-width:700px\) and \(max-height:400px\) and \(orientation:landscape\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /\/\* Stage 10E long-text and overflow resilience \*\//);
+});
+
+test("practice modal A: fixed header and footer frame a scrollable middle region", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+
+  assert.match(hotfix, /#page-practice-setup \.modal-window\{[\s\S]*?overflow-y:hidden;/);
+  assert.match(hotfix, /#page-practice-setup \.section-head\{[\s\S]*?flex-shrink:0;/);
+  assert.match(hotfix, /#page-practice-setup \.setup-card\{[\s\S]*?flex:1 1 auto;[\s\S]*?min-height:0;[\s\S]*?overflow-x:hidden;[\s\S]*?overflow-y:auto;/);
+  assert.match(hotfix, /#page-practice-setup \.setup-actions\{[\s\S]*?position:static;[\s\S]*?flex-shrink:0;/);
+});
+
+test("practice modal B: the CTA footer cannot overlay setup content", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+  const actions = hotfix.match(/#page-practice-setup \.setup-actions\{([^}]*)\}/)?.[1] || "";
+
+  assert.match(actions, /position:static;/);
+  assert.doesNotMatch(actions, /position:(?:sticky|fixed|absolute)|bottom:|z-index:|background:/);
+  assert.doesNotMatch(hotfix, /scroll-padding-bottom:/);
+});
+
+test("practice modal C: Korean option labels prefer intact words on narrow screens", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+
+  assert.match(hotfix, /#page-practice-setup \.check-item span\{[\s\S]*?min-width:0;[\s\S]*?overflow-wrap:anywhere;[\s\S]*?word-break:keep-all;/);
+  assert.match(hotfix, /@media \(max-width:390px\)\{[\s\S]*?#page-practice-setup #crop-grid\{[\s\S]*?column-gap:2px;[\s\S]*?#page-practice-setup #crop-grid \.check-item\{[\s\S]*?gap:4px;[\s\S]*?padding-inline:4px;/);
+  assert.doesNotMatch(hotfix, /라이밀|트리티케일|<br>|font-size:/);
+});
+
+test("practice modal D: emergency wrapping still contains an unbroken long token", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const stage10e = css.slice(css.lastIndexOf("/* Stage 10E long-text and overflow resilience */"));
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+
+  assert.match(stage10e, /\.modal-window \.check-item span,[\s\S]*?overflow-wrap:anywhere;/);
+  assert.match(hotfix, /#page-practice-setup \.check-item span\{[\s\S]*?overflow-wrap:anywhere;/);
+  assert.match(hotfix, /#page-practice-setup \.setup-card\{[\s\S]*?overflow-x:hidden;/);
+});
+
+test("practice modal E: small portrait and landscape sizes retain a visible 44px CTA contract", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const sizes = [[360, 568], [360, 620], [360, 640], [360, 740], [375, 667], [390, 844], [412, 915], [667, 375], [700, 390]];
+
+  assert.equal(sizes.every(([width, height]) => width > 0 && height > 0), true);
+  assert.match(css, /\.modal-window\{[^}]*max-height:min\(86vh, 760px\);[^}]*display:flex;[^}]*flex-direction:column;/);
+  assert.match(css, /\.modal-window \.btn\{[\s\S]*?min-height:44px;/);
+  assert.match(css, /\.modal-layer\{[\s\S]*?calc\(20px \+ env\(safe-area-inset-top,0px\)\)[\s\S]*?calc\(20px \+ env\(safe-area-inset-right,0px\)\)[\s\S]*?calc\(20px \+ env\(safe-area-inset-bottom,0px\)\)/);
+});
+
+test("practice modal F: Stage 10F focus trap, Escape, and opener restoration stay wired", () => {
+  const runtime = createRuntime();
+  runtime.api.init();
+  runtime.element("btn-home-practice").focus();
+  runtime.element("btn-home-practice").click();
+
+  assert.equal(runtime.activeElement(), runtime.element("btn-practice-close"));
+  runtime.element("btn-practice-close").focus();
+  const shiftTab = runtime.triggerKeydown("Tab", { shiftKey: true });
+  assert.equal(shiftTab.defaultPrevented, true);
+  assert.equal(runtime.activeElement(), runtime.element("btn-practice-start"));
+  runtime.triggerKeydown("Escape");
+  assert.equal(runtime.activeElement(), runtime.element("btn-home-practice"));
+});
+
+test("practice modal G: PLAY pill and HOME retain their shared mobile touch geometry", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+
+  assert.match(hotfix, /#page-play #play-mode-pill,[\s\S]*?#page-play #btn-play-home\{[\s\S]*?height:44px !important;[\s\S]*?min-height:44px !important;[\s\S]*?align-self:flex-start;/);
+});
+
+test("practice modal H: PLAY anchor, HOME, RESULT, R2, and reduced motion remain isolated", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "style.css"), "utf8");
+  const hotfix = css.slice(css.lastIndexOf("/* Final PLAY header and practice CTA hotfix */"));
+
+  assert.doesNotMatch(hotfix, /#page-home|#page-result|\.play-flow|\.answer-zone|prefers-reduced-motion|orientation:landscape/);
+  assert.match(css, /\.play-flow:has\(\.answer-zone\.mode-submit\)\{[\s\S]*?padding-top:clamp\(14px,6svh,52px\);/);
+  assert.match(css, /filter:blur\(30px\) brightness\(\.52\) saturate\(\.88\);/);
+  assert.match(css, /grid-template-rows:auto auto auto minmax\(96px,1fr\) auto !important;/);
+  assert.match(css, /@media \(max-width:700px\) and \(max-height:400px\) and \(orientation:landscape\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+function setSamplingPracticeSelection(runtime, overrides = {}) {
+  runtime.api.state.mode = "practice";
+  runtime.api.state.selectedExamTypes = overrides.examTypes || [...runtime.api.EXAM_TYPES];
+  runtime.api.state.selectedStageGroups = overrides.stageGroups || [...runtime.api.STAGE_GROUPS];
+  runtime.api.state.selectedCrops = overrides.crops || [...runtime.api.CROPS];
+}
+
+function samplingWeightFixtures(runtime) {
+  const high = runtime.api.QUESTION_SET.find(q => q.crop === "벼" && q.stage === "보급종");
+  const low = runtime.api.QUESTION_SET.find(q => q.crop === "팥" && q.stage === "원원종");
+  assert.ok(high);
+  assert.ok(low);
+  return { high, low };
+}
+
+test("sampling policy A: time mode uses weighted sampling", () => {
+  const runtime = createRuntime();
+  runtime.api.state.mode = "time";
+  assert.equal(runtime.api.getSamplingPolicy(), "weighted");
+});
+
+test("sampling policy B: practice with all exact selections uses weighted sampling", () => {
+  const runtime = createRuntime();
+  setSamplingPracticeSelection(runtime);
+  assert.equal(runtime.api.isFullPracticeSelection(), true);
+  assert.equal(runtime.api.getSamplingPolicy(), "weighted");
+});
+
+test("sampling policy C: narrowing only exam type makes practice uniform", () => {
+  const runtime = createRuntime();
+  setSamplingPracticeSelection(runtime, { examTypes: [runtime.api.EXAM_TYPES[0]] });
+  assert.equal(runtime.api.getSamplingPolicy(), "uniform");
+});
+
+test("sampling policy D: narrowing only stage makes practice uniform", () => {
+  const runtime = createRuntime();
+  setSamplingPracticeSelection(runtime, { stageGroups: runtime.api.STAGE_GROUPS.slice(0, 2) });
+  assert.equal(runtime.api.getSamplingPolicy(), "uniform");
+});
+
+test("sampling policy E: narrowing only crop makes practice uniform", () => {
+  const runtime = createRuntime();
+  setSamplingPracticeSelection(runtime, { crops: runtime.api.CROPS.slice(0, 2) });
+  assert.equal(runtime.api.getSamplingPolicy(), "uniform");
+});
+
+test("sampling policy F: two full dimensions never hide a narrowed third dimension", () => {
+  const runtime = createRuntime();
+  const narrowedSelections = [
+    { examTypes: [runtime.api.EXAM_TYPES[0]] },
+    { stageGroups: [runtime.api.STAGE_GROUPS[1]] },
+    { crops: [runtime.api.CROPS[0]] }
+  ];
+  for (const selection of narrowedSelections) {
+    setSamplingPracticeSelection(runtime, selection);
+    assert.equal(runtime.api.isFullPracticeSelection(), false);
+    assert.equal(runtime.api.getSamplingPolicy(), "uniform");
+  }
+});
+
+test("sampling policy G: wrong-practice always uses uniform sampling", () => {
+  const runtime = createRuntime();
+  runtime.api.state.mode = "wrong-practice";
+  runtime.api.state.selectedExamTypes = [];
+  runtime.api.state.selectedStageGroups = [];
+  runtime.api.state.selectedCrops = [];
+  assert.equal(runtime.api.getSamplingPolicy(), "uniform");
+});
+
+test("sampling policy H: uniformPick assigns equal-width probability intervals", () => {
+  let randomValue = 0;
+  const runtime = createRuntime({}, { random: () => randomValue });
+  const source = runtime.api.QUESTION_SET.slice(0, 3);
+  const cases = [
+    [0, 0],
+    [1 / 3 - Number.EPSILON, 0],
+    [1 / 3, 1],
+    [2 / 3 - Number.EPSILON, 1],
+    [2 / 3, 2],
+    [1 - Number.EPSILON, 2]
+  ];
+  for (const [sample, expectedIndex] of cases) {
+    randomValue = sample;
+    assert.equal(runtime.api.uniformPick(source), source[expectedIndex]);
+  }
+});
+
+test("sampling policy I: uniformPick ignores question weight", () => {
+  const runtime = createRuntime({}, { random: () => 0.75 });
+  const { high, low } = samplingWeightFixtures(runtime);
+  assert.equal(runtime.api.uniformPick([high, low]), low);
+  assert.equal(runtime.api.uniformPick([low, high]), high);
+});
+
+test("sampling policy J: weightedPick still respects weight and cumulative boundaries", () => {
+  let randomValue = 0.75;
+  const runtime = createRuntime({}, { random: () => randomValue });
+  const { high, low } = samplingWeightFixtures(runtime);
+  assert.equal(runtime.api.weightedPick([high, low]), high);
+  randomValue = 0.9;
+  assert.equal(runtime.api.weightedPick([high, low]), high);
+  randomValue = 0.9 + Number.EPSILON;
+  assert.equal(runtime.api.weightedPick([high, low]), low);
+});
+
+test("sampling policy K: weighted mode prevents an immediate repeat", () => {
+  const runtime = createRuntime({}, { random: () => 0 });
+  const { high, low } = samplingWeightFixtures(runtime);
+  runtime.api.state.mode = "time";
+  runtime.api.state.pool = [high, low];
+  runtime.api.state.curQuestion = high;
+  assert.equal(runtime.api.pickQuestion(), low);
+});
+
+test("sampling policy L: uniform mode prevents an immediate repeat", () => {
+  const runtime = createRuntime({}, { random: () => 0 });
+  const { high, low } = samplingWeightFixtures(runtime);
+  runtime.api.state.mode = "wrong-practice";
+  runtime.api.state.pool = [high, low];
+  runtime.api.state.curQuestion = high;
+  assert.equal(runtime.api.pickQuestion(), low);
+});
+
+test("sampling policy M: a single-question pool falls back to that question", () => {
+  const runtime = createRuntime({}, { random: () => 0.999999 });
+  const only = runtime.api.QUESTION_SET[0];
+  runtime.api.state.pool = [only];
+  runtime.api.state.curQuestion = only;
+  runtime.api.state.mode = "time";
+  assert.equal(runtime.api.pickQuestion(), only);
+  runtime.api.state.mode = "wrong-practice";
+  assert.equal(runtime.api.pickQuestion(), only);
+});
+
+test("sampling policy N: an empty pool still returns null", () => {
+  const runtime = createRuntime();
+  runtime.api.state.pool = [];
+  for (const mode of ["time", "practice", "wrong-practice"]) {
+    runtime.api.state.mode = mode;
+    assert.equal(runtime.api.pickQuestion(), null);
+  }
+});
+
+test("sampling policy O: restoredQuestion bypasses every picker", () => {
+  const runtime = createRuntime({}, { random: () => { throw new Error("picker must not run"); } });
+  const restored = runtime.api.QUESTION_SET[4];
+  runtime.api.state.mode = "wrong-practice";
+  runtime.api.state.pool = [runtime.api.QUESTION_SET[0], restored];
+  assert.doesNotThrow(() => runtime.api.startRound(restored));
+  assert.equal(runtime.api.state.curQuestion, restored);
+});
+
+test("sampling policy P: exact full-selection detection is order-independent", () => {
+  const runtime = createRuntime();
+  setSamplingPracticeSelection(runtime, {
+    examTypes: [...runtime.api.EXAM_TYPES].reverse(),
+    stageGroups: [...runtime.api.STAGE_GROUPS].reverse(),
+    crops: [...runtime.api.CROPS].reverse()
+  });
+  assert.equal(runtime.api.isFullPracticeSelection(), true);
+  assert.equal(runtime.api.getSamplingPolicy(), "weighted");
+});
+
+test("sampling policy Q: duplicate or malformed pseudo-full selections are not full", () => {
+  const runtime = createRuntime();
+  const duplicateExamTypes = runtime.api.EXAM_TYPES.map(() => runtime.api.EXAM_TYPES[0]);
+  assert.equal(runtime.api.hasExactSelection(duplicateExamTypes, runtime.api.EXAM_TYPES), false);
+  assert.equal(runtime.api.hasExactSelection(null, runtime.api.EXAM_TYPES), false);
+  assert.equal(runtime.api.hasExactSelection("포장검사,종자검사", runtime.api.EXAM_TYPES), false);
+  setSamplingPracticeSelection(runtime, { examTypes: duplicateExamTypes });
+  assert.equal(runtime.api.getSamplingPolicy(), "uniform");
 });
